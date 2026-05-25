@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Deny-all by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidProject(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId.size() <= 128
+        && data.userId == request.auth.uid
+        && data.videoName is string && data.videoName.size() <= 512
+        && data.captions is string && data.captions.size() <= 1048576; // Cap at 1MB
+    }
+
+    // 2. Projects Collection Matching Rules
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && isOwner(resource.data.userId);
+      
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() 
+        && isValidId(projectId)
+        && isValidProject(request.resource.data)
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if isSignedIn() 
+        && isValidId(projectId)
+        && isValidProject(request.resource.data)
+        && isOwner(resource.data.userId)
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if isSignedIn() && isOwner(resource.data.userId);
+    }
+  }
+}

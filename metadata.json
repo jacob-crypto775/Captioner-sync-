@@ -1,0 +1,8 @@
+{
+  "name": "SyncScript",
+  "description": "Secure, client-side automated video transcription and subtitle burning studio powered by WebAssembly FFmpeg and the Google Gemini File API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

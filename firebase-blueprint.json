@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "project": {
+      "title": "Project",
+      "description": "User video captioning and subtitling project data model",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique project identifier"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user identifier"
+        },
+        "videoName": {
+          "type": "string",
+          "description": "Name of the uploaded video file"
+        },
+        "captions": {
+          "type": "string",
+          "description": "Serialized list of caption subtitle segments (JSON string format)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Updating timestamp"
+        }
+      },
+      "required": ["id", "userId", "videoName", "captions"]
+    }
+  },
+  "firestore": {
+    "projects/{projectId}": {
+      "schema": "project",
+      "description": "Personal workspace projects containing customized subtitle track configurations"
+    }
+  }
+}
