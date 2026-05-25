@@ -146,7 +146,7 @@ export default function App() {
 
   // Transcribe Flow States
   const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    return localStorage.getItem('syncscript_gemini_key') || '';
+    return localStorage.getItem('syncscript_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
   });
   const [inputKey, setInputKey] = useState<string>('');
   

@@ -22,8 +22,9 @@ export async function uploadToGoogleFileApi(
   apiKey: string,
   onProgress?: (progress: number) => void
 ): Promise<{ fileName: string; fileUri: string }> {
+  const finalGeminiKey = apiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
   // 1. Initial POST request to request upload location
-  const initUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`;
+  const initUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${finalGeminiKey}`;
   
   const initHeaders = new Headers({
     'X-Goog-Upload-Protocol': 'resumable',
@@ -101,7 +102,8 @@ export async function pollGoogleFileState(
   apiKey: string,
   onStatusUpdate?: (status: string) => void
 ): Promise<void> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${apiKey}`;
+  const finalGeminiKey = apiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${finalGeminiKey}`;
 
   while (true) {
     const response = await fetch(url);
@@ -175,7 +177,8 @@ export async function generateTimestampedCaptionsInline(
   modelName: string = 'gemini-2.0-flash',
   languageMode: string = 'Pure English (Translation Mode)'
 ): Promise<CaptionSegment[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  const finalGeminiKey = apiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${finalGeminiKey}`;
 
   let targetPromptLanguage = '';
   switch (languageMode) {
@@ -305,7 +308,8 @@ export async function generateTimestampedCaptions(
   modelName: string = 'gemini-2.0-flash',
   languageMode: string = 'Pure English (Translation Mode)'
 ): Promise<CaptionSegment[]> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+  const finalGeminiKey = apiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${finalGeminiKey}`;
 
   let targetPromptLanguage = '';
   switch (languageMode) {
@@ -505,9 +509,10 @@ export async function generateTimestampedCaptionsGroq(
   }));
 
   // Batch Spell-Check Pipeline (Groq -> Gemini Single API Call)
-  if (geminiApiKey && geminiApiKey.trim()) {
+  const finalGeminiKey = geminiApiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  if (finalGeminiKey && finalGeminiKey.trim()) {
     const rawTexts = mappedSegments.map(s => s.text);
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
     
     const requestBody = {
       contents: [
@@ -570,7 +575,8 @@ ${JSON.stringify(rawTexts)}`
  * Script converter helper using Gemini 2.0 Flash
  */
 export async function convertToGurmukhi(romanText: string, geminiApiKey: string): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+  const finalGeminiKey = geminiApiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
   const requestBody = {
     contents: [
       {
