@@ -131,6 +131,11 @@ const PRESETS: StylePreset[] = [
   }
 ];
 
+function getBundledGeminiApiKey(): string {
+  // @ts-ignore
+  return import.meta.env.VITE_GEMINI_API_KEY || '';
+}
+
 export default function App() {
   // Core Workflow State
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
@@ -148,7 +153,7 @@ export default function App() {
 
   // Transcribe Flow States
   const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    return localStorage.getItem('syncscript_gemini_key') || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+    return localStorage.getItem('syncscript_gemini_key') || getBundledGeminiApiKey();
   });
   const [inputKey, setInputKey] = useState<string>('');
   
