@@ -563,22 +563,31 @@ export async function correctCaptionsSpellingGemini(
   let fileParts: any[] = [];
 
   if (videoFile) {
-    if (onStatusUpdate) onStatusUpdate('Uploading media file to Google servers for audio-assisted verification...');
-    const uploadRes = await uploadToGoogleFileApi(videoFile, finalGeminiKey, (progress) => {
-      if (onStatusUpdate) onStatusUpdate(`Uploading audio track to Google File API: ${progress}%`);
-    });
+    try {
+      if (onStatusUpdate) onStatusUpdate('Uploading media file to Google servers for audio-assisted verification...');
+      const uploadRes = await uploadToGoogleFileApi(videoFile, finalGeminiKey, (progress) => {
+        if (onStatusUpdate) onStatusUpdate(`Uploading audio track to Google File API: ${progress}%`);
+      });
 
-    if (onStatusUpdate) onStatusUpdate('Processing uploaded stream on Google hardware...');
-    await pollGoogleFileState(uploadRes.fileName, finalGeminiKey, (status) => {
-      if (onStatusUpdate) onStatusUpdate(status);
-    });
+      if (onStatusUpdate) onStatusUpdate('Processing uploaded stream on Google hardware...');
+      await pollGoogleFileState(uploadRes.fileName, finalGeminiKey, (status) => {
+        if (onStatusUpdate) onStatusUpdate(status);
+      });
 
-    fileParts.push({
-      fileData: {
-        fileUri: uploadRes.fileUri,
-        mimeType: videoFile.type || 'video/mp4'
+      fileParts.push({
+        fileData: {
+          fileUri: uploadRes.fileUri,
+          mimeType: videoFile.type || 'video/mp4'
+        }
+      });
+    } catch (uploadError) {
+      console.warn("Audio-assisted upload failed or not supported in this API key level. Falling back to text-only cognitive refinement.", uploadError);
+      if (onStatusUpdate) {
+        onStatusUpdate("⚠️ Audio upload not supported (free key restriction). Falling back to precise text cognitive spellcheck...");
       }
-    });
+      // Disable video file guiding for this run so it falls back to text-only prompt
+      videoFile = null;
+    }
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
@@ -692,13 +701,18 @@ ${JSON.stringify(texts)}`;
 export async function mapCaptionsToSelectedScript(
   captions: CaptionSegment[],
   languageMode: string,
-  apiKey: string
+  apiKey: string,
+  onStatusUpdate?: (status: string) => void
 ): Promise<CaptionSegment[]> {
   if (!captions || captions.length === 0) return captions;
 
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
   if (!finalGeminiKey) {
     console.warn('Skipping script mapping pass because Gemini API key is missing.');
+    if (onStatusUpdate) {
+      onStatusUpdate('⚠️ Gemini API key is missing from Vercel! Skipping spellcheck & using raw Groq output.');
+      await new Promise(r => setTimeout(r, 2200));
+    }
     return captions;
   }
 
@@ -735,6 +749,10 @@ Input segments:
 ${JSON.stringify(texts)}`;
 
   try {
+    if (onStatusUpdate) {
+      onStatusUpdate('Applying Gemini language mapping and spelling correction...');
+    }
+
     const requestBody = {
       contents: [{
         parts: [{ text: prompt }]
@@ -756,6 +774,14 @@ ${JSON.stringify(texts)}`;
 
     if (!response.ok) {
       console.error('Script mapping API request failed:', response.status);
+      if (onStatusUpdate) {
+        if (response.status === 429) {
+          onStatusUpdate('⚠️ Gemini rate-limited (429 Quota Exceeded). Using raw Groq output.');
+        } else {
+          onStatusUpdate(`⚠️ Gemini mapping failed (HTTP ${response.status}). Using raw Groq output.`);
+        }
+        await new Promise(r => setTimeout(r, 2200));
+      }
       return captions;
     }
 
@@ -777,8 +803,12 @@ ${JSON.stringify(texts)}`;
     } else {
       console.warn('Script mapper parsed array length mistmatch. Expected:', captions.length, 'Got:', parsed?.length);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to map captions script via Gemini:', error);
+    if (onStatusUpdate) {
+      onStatusUpdate('⚠️ Gemini connection error. Using raw Groq output.');
+      await new Promise(r => setTimeout(r, 2200));
+    }
   }
 
   return captions;

@@ -395,7 +395,8 @@ export default function App() {
           const mappedCaptions = await mapCaptionsToSelectedScript(
             parsedCaptions,
             captionLanguageMode,
-            geminiApiKey.trim()
+            geminiApiKey.trim(),
+            (status) => setTranscribeStatus(status)
           );
           setCaptions(mappedCaptions);
           setUploadProgress(100);
@@ -432,7 +433,8 @@ export default function App() {
           const mappedCaptions = await mapCaptionsToSelectedScript(
             calibratedAndFixed,
             captionLanguageMode,
-            geminiApiKey.trim()
+            geminiApiKey.trim(),
+            (status) => setTranscribeStatus(status)
           );
           setCaptions(mappedCaptions);
           setTranscribeStatus('Successfully transcribed captions!');
