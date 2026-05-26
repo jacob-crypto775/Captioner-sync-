@@ -219,6 +219,7 @@ Return JSON array only:
 [{"startTime": 0.0, "endTime": 1.5, "text": "ਪੰਜਾਬੀ ਸ਼ਬਦ"}]
 
 Rules:
+- You MUST transcribe the entire video/audio length from 0.0 seconds all the way until the very end of the file. Do NOT truncate, omit, or stop transcribing halfway through. Everything spoken must be transcribed chronologically.
 - NEVER overlap timestamps
 - Each segment MAX 4 words only
 - startTime of segment N must ALWAYS be >= endTime of segment N-1
@@ -229,6 +230,7 @@ Return JSON array only:
 [{"startTime": 0.0, "endTime": 1.5, "text": "transcribed words"}]
 
 Rules:
+- You MUST transcribe the entire video/audio length from 0.0 seconds all the way until the very end of the file. Do NOT truncate, omit, or stop transcribing halfway through. Everything spoken must be transcribed chronologically.
 - NEVER overlap timestamps
 - Each segment MAX 4 words only
 - startTime of segment N must ALWAYS be >= endTime of segment N-1
@@ -350,6 +352,7 @@ Return JSON array only:
 [{"startTime": 0.0, "endTime": 1.5, "text": "ਪੰਜਾਬੀ ਸ਼ਬਦ"}]
 
 Rules:
+- You MUST transcribe the entire video/audio length from 0.0 seconds all the way until the very end of the file. Do NOT truncate, omit, or stop transcribing halfway through. Everything spoken must be transcribed chronologically.
 - NEVER overlap timestamps
 - Each segment MAX 4 words only
 - startTime of segment N must ALWAYS be >= endTime of segment N-1
@@ -360,6 +363,7 @@ Return JSON array only:
 [{"startTime": 0.0, "endTime": 1.5, "text": "transcribed words"}]
 
 Rules:
+- You MUST transcribe the entire video/audio length from 0.0 seconds all the way until the very end of the file. Do NOT truncate, omit, or stop transcribing halfway through. Everything spoken must be transcribed chronologically.
 - NEVER overlap timestamps
 - Each segment MAX 4 words only
 - startTime of segment N must ALWAYS be >= endTime of segment N-1
@@ -733,24 +737,27 @@ export async function mapCaptionsToSelectedScript(
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
 
-  const prompt = `You are an expert bilingual dialect proofreader and script mapper. 
-We have raw caption segments transcribed from video audio. Your task is to process this JSON list of text segments and ensure they conform to the selected script style.
+  const prompt = `You are an AI subtitle wizard acting as the second stage of a high-performance hybrid pipeline (Groq Whisper v3 + Gemini).
+Groq Whisper has processed the video audio and generated high-quality timestamps, but its raw transcript wording is rough, phonetically literal, or has grammatical, spelling, formatting and language slips.
 
-TARGET SCRIPT SPECIFICATION:
+Your job is to read all transcription segments together as a single continuous dialogue/monologue, and rewrite, proofread, and refine the wording of each segment so the total flow is 100% natural, correct, fluent, and extremely professional in the target language style, suitable for high-impact social media captions (capturing the right emotional depth).
+
+TARGET LANGUAGE SPECIFICATION:
 ${targetPrompt}
 
-CRITICAL INSTRUCTIONS:
-1. Maintain the EXACT same array length of ${texts.length} elements.
-2. Maintain the exact order and correspondence. Do NOT merge, skip, or split any items.
-3. Keep the script conversion extremely natural and exact.
-4. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+STRICT OPERATIONAL DIRECTIVES:
+1. Preserve the continuous sentence flow. Do NOT translate Romanized Punjabi into English or Gurmukhi script. Convert it to standard, clean Romanized script spelling (e.g., "Satsriakal" to "Sat Sri Akal", "vyah" to "Vyah", "vadhia" to "Vadiya", "gro" to "Grow").
+2. For Gurmukhi Punjabi, keep correct Gurmukhi script characters with precise spelling, spaces, and matras.
+3. Fix all stuttering, raw phonetic mistakes, weird punctuation, or lowercase errors, returning clean, readable words suited for Instagram Reels, YouTube, and TikTok video subtitles (which use short, high-impact phrasing).
+4. Maintain the EXACT same index and order of the original array (the input has ${texts.length} elements). Do NOT skip, merge, or change the item count.
+5. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
 
 Input segments:
 ${JSON.stringify(texts)}`;
 
   try {
     if (onStatusUpdate) {
-      onStatusUpdate('Applying Gemini language mapping and spelling correction...');
+      onStatusUpdate('Combining Groq timestamps with Gemini wording engine...');
     }
 
     const requestBody = {
@@ -815,7 +822,7 @@ ${JSON.stringify(texts)}`;
 }
 
 /**
- * Script converter helper using Gemini 2.0 Flash
+ * Script converter helper using Gemini 3.5 Flash
  */
 export async function convertToGurmukhi(romanText: string, geminiApiKey: string): Promise<string> {
   const finalGeminiKey = geminiApiKey || getBundledGeminiApiKey();

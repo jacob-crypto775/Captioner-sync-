@@ -7,7 +7,6 @@ import {
   generateTimestampedCaptionsInline,
   generateTimestampedCaptionsGroq,
   parseTimestampToSeconds,
-  correctCaptionsSpellingGemini,
   mapCaptionsToSelectedScript
 } from './geminiUtils';
 import { 
@@ -83,28 +82,313 @@ interface StylePreset {
   id: string;
   name: string;
   description: string;
+  category: string;
   config: BurnConfig;
 }
 
 const PRESETS: StylePreset[] = [
+  // 💥 Active Word Zoom Category
   {
-    id: 'bold-cinematic',
-    name: '📽️ Bold Cinematic',
-    description: 'Yellow text, thick outline, high readability for drama and dialogue.',
+    id: 'bouncy-social-pink',
+    name: '💗 Social Cherry Zoom',
+    description: 'Vibrant cherry pink active words that spring-scale 1.35x. Perfect for modern reels.',
+    category: '💥 Active Word Zoom',
     config: {
-      fontSize: 28,
-      fontColor: '#facc15', // Neon yellow
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3.5,
+      positionY: 80,
+      highlightType: 'word-scale',
+      activeWordColor: '#f43f5e',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'bouncy-social-yellow',
+    name: '💛 Hormozi Neon Yellow',
+    description: 'Classic high contrast bold Neon Yellow spoken words scaling up 1.35x for maximum emphasis.',
+    category: '💥 Active Word Zoom',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000005',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      positionY: 82,
+      highlightType: 'word-scale',
+      activeWordColor: '#FFFF00',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'bouncy-sky-grow',
+    name: '💎 Sky Blue Gravity Pop',
+    description: 'Clean light sky blue active keywords zooming into focus on spoken segment cue points.',
+    category: '💥 Active Word Zoom',
+    config: {
+      fontSize: 25,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3,
+      positionY: 80,
+      highlightType: 'word-scale',
+      activeWordColor: '#00FFFF',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'bouncy-lime-burst',
+    name: '🦖 Neon Lime Giant Scale',
+    description: 'Super-sized bright Neon Lime Green keyword highlight scaling up 1.45x for extreme punch.',
+    category: '💥 Active Word Zoom',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
       backgroundColor: '#000000',
       backgroundOpacity: 0,
       strokeColor: '#000000',
       strokeWidth: 4,
-      positionY: 80
+      positionY: 80,
+      highlightType: 'word-scale',
+      activeWordColor: '#00FF00',
+      activeWordBgColor: '#000000'
+    }
+  },
+
+  // 🔥 Reels & Shorts Category
+  {
+    id: 'reels-word-highlight',
+    name: '🔥 Alex Hormozi Yellow Pop',
+    description: 'Active word gets a bright yellow capsule backdrop. Industry standard for high-retention reels.',
+    category: '🔥 Reels & Shorts',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3,
+      positionY: 82,
+      highlightType: 'word-bg',
+      activeWordColor: '#000000',
+      activeWordBgColor: '#eab308'
+    }
+  },
+  {
+    id: 'podcast-pill',
+    name: '🎙️ Podcast Orange Pill',
+    description: 'Rounded neon-orange pill background wraps the active word with high impact and energy.',
+    category: '🔥 Reels & Shorts',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 2,
+      positionY: 80,
+      highlightType: 'podcast-pill',
+      activeWordColor: '#ffffff',
+      activeWordBgColor: '#f97316'
+    }
+  },
+  {
+    id: 'abdaal-green-capsule',
+    name: '☘️ Abdaal Green Capsule',
+    description: 'Clean light emerald capsule backdrop on active keywords. Perfect for clean content creator style.',
+    category: '🔥 Reels & Shorts',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 2.5,
+      positionY: 80,
+      highlightType: 'word-bg',
+      activeWordColor: '#ffffff',
+      activeWordBgColor: '#22c55e'
+    }
+  },
+  {
+    id: 'crimson-aura-pop',
+    name: '🍒 Crimson Aura Pop',
+    description: 'Vivid cherry pink/red high-speed active word highlights for intense speech parts.',
+    category: '🔥 Reels & Shorts',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3,
+      positionY: 82,
+      highlightType: 'word-bg',
+      activeWordColor: '#ffffff',
+      activeWordBgColor: '#e11d48'
+    }
+  },
+
+  // ⚡ Neon Glow Category
+  {
+    id: 'karaoke-glow',
+    name: '❄️ Ice Cyan Glow',
+    description: 'Active word pops with electric neon-cyan backlight glowing shadow and size surge.',
+    category: '⚡ Neon Glow',
+    config: {
+      fontSize: 27,
+      fontColor: '#e5e7eb',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      positionY: 78,
+      highlightType: 'karaoke-glow',
+      activeWordColor: '#22d3ee',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'neon-glow-green',
+    name: '💚 Limelight Green Glow',
+    description: 'Electric lime green aura text shadow that leaps out with radioactive energy.',
+    category: '⚡ Neon Glow',
+    config: {
+      fontSize: 27,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3.5,
+      positionY: 78,
+      highlightType: 'karaoke-glow',
+      activeWordColor: '#a3e635',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'neon-glow-gold',
+    name: '🌟 Solar Eclipse Gold',
+    description: 'Sun-drenched bright gold electric backlight glow on spoken word segments.',
+    category: '⚡ Neon Glow',
+    config: {
+      fontSize: 27,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      positionY: 78,
+      highlightType: 'karaoke-glow',
+      activeWordColor: '#fbbf24',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'neon-glow-purple',
+    name: '💜 Cosmic Purple Majesty',
+    description: 'Ultraviolet pulsing aura glow on spoken text segments for tech and space vibes.',
+    category: '⚡ Neon Glow',
+    config: {
+      fontSize: 27,
+      fontColor: '#e2e8f0',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3,
+      positionY: 78,
+      highlightType: 'karaoke-glow',
+      activeWordColor: '#c084fc',
+      activeWordBgColor: '#000000'
+    }
+  },
+
+  // 🎙️ Vlog & Podcast Category
+  {
+    id: 'vlog-green-outline',
+    name: '✨ Clean Green Outline',
+    description: 'High contrast black outlined letters with active words turning dynamic grass green.',
+    category: '🎙️ Vlog & Podcast',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 3,
+      positionY: 78,
+      highlightType: 'word-color',
+      activeWordColor: '#22c55e',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'vlog-sky-accent',
+    name: '💎 Sky Blue Minimal',
+    description: 'Clean vlogging layout with elegant water-like cold sky blue keyword highlights.',
+    category: '🎙️ Vlog & Podcast',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 2,
+      positionY: 80,
+      highlightType: 'word-color',
+      activeWordColor: '#38bdf8',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'vlog-candy-pink',
+    name: '🍭 Pastel Candy Pink',
+    description: 'Bright playful styling featuring a warm neon pink splash on spoken keywords.',
+    category: '🎙️ Vlog & Podcast',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 2.5,
+      positionY: 78,
+      highlightType: 'word-color',
+      activeWordColor: '#f472b6',
+      activeWordBgColor: '#000000'
+    }
+  },
+
+  // 🎞️ Cinematic & Clean Category
+  {
+    id: 'bold-cinematic',
+    name: '📽️ Bold Cinematic Yellow',
+    description: 'Thick black-outlined yellow lettering. Standard for documentaries, movies and dramatic audio.',
+    category: '🎞️ Cinematic & Clean',
+    config: {
+      fontSize: 28,
+      fontColor: '#facc15',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      positionY: 80,
+      highlightType: 'none',
+      activeWordColor: '#facc15',
+      activeWordBgColor: '#000000'
     }
   },
   {
     id: 'minimalist-modern',
-    name: '📱 Minimalist Modern',
-    description: 'Elegant white text mounted on a semi-transparent dark back-plate.',
+    name: '📱 Minimalist Dark Plate',
+    description: 'Elegant white dialogue centered inside an adjustable semi-transparent backdrop box.',
+    category: '🎞️ Cinematic & Clean',
     config: {
       fontSize: 22,
       fontColor: '#ffffff',
@@ -112,21 +396,84 @@ const PRESETS: StylePreset[] = [
       backgroundOpacity: 0.65,
       strokeColor: '#000000',
       strokeWidth: 0,
-      positionY: 82
+      positionY: 82,
+      highlightType: 'none',
+      activeWordColor: '#ffffff',
+      activeWordBgColor: '#000000'
     }
   },
   {
-    id: 'trendy-reel',
-    name: '⚡ Trendy Reel Style',
-    description: 'Bright electric cyan highlights with a clean modern borderless aesthetic.',
+    id: 'classic-white',
+    name: '🕊️ Plain High Contrast',
+    description: 'Pure borderless white subtitle overlay with high legibility drop shadow backing.',
+    category: '🎞️ Cinematic & Clean',
     config: {
-      fontSize: 26,
-      fontColor: '#22d3ee', // Cyan
+      fontSize: 25,
+      fontColor: '#ffffff',
       backgroundColor: '#000000',
       backgroundOpacity: 0,
       strokeColor: '#000000',
-      strokeWidth: 2,
-      positionY: 78
+      strokeWidth: 1.5,
+      positionY: 84,
+      highlightType: 'none',
+      activeWordColor: '#ffffff',
+      activeWordBgColor: '#000000'
+    }
+  },
+
+  // 🎬 Pro Retaining Shorts Styles
+  {
+    id: 'hyper-reels-lime',
+    name: '✨ Pro Reels Lime Green',
+    description: 'Breathtaking 3D layout featuring neutral white secondary words and ultra-bold glowing neon lime green active words with strong text outlines.',
+    category: '💥 Active Word Zoom',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      positionY: 80,
+      highlightType: 'hyper-reels',
+      activeWordColor: '#00FF00',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'hyper-reels-cyan',
+    name: '⚡ Hyper Glow Cyber Blue',
+    description: 'Intense glowing neon-cyan keyword highlight coupled with energetic tilt scaling.',
+    category: '⚡ Neon Glow',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4,
+      positionY: 80,
+      highlightType: 'hyper-reels',
+      activeWordColor: '#00FFFF',
+      activeWordBgColor: '#000000'
+    }
+  },
+  {
+    id: 'cursive-sandwich-yellow',
+    name: '👑 Pro Cursive Sandwich',
+    description: 'Slightly smaller, artistic handwriting cursive helper words paired with giant bold block-uppercase gold keyword highlights.',
+    category: '🔥 Reels & Shorts',
+    config: {
+      fontSize: 26,
+      fontColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0,
+      strokeColor: '#000000',
+      strokeWidth: 4.5,
+      positionY: 80,
+      highlightType: 'cursive-sandwich',
+      activeWordColor: '#FFFF00',
+      activeWordBgColor: '#000000'
     }
   }
 ];
@@ -148,7 +495,14 @@ export default function App() {
   // Transcribed Captions State (Standard initial Punjabi mock translations)
   const [captions, setCaptions] = useState<CaptionSegment[]>([
     { id: '1', startTime: 1.2, endTime: 4.5, text: 'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ, ਸਵਾਗਤ ਹੈ ਤੁਹਾਡਾ!' },
-    { id: '2', startTime: 4.8, endTime: 8.0, text: 'Today we are burning dynamic Punjabi subtitles on the fly.' }
+    { id: '2', startTime: 4.8, endTime: 8.0, text: 'Today we are burning dynamic Punjabi subtitles on the fly.' },
+    { id: '3', startTime: 8.3, endTime: 12.0, text: 'ਪ੍ਰੋਫੈਸ਼ਨਲ ਵੀਡੀਓ ਸਬਟਾਈਟਲਸ ਹੁਣ ਮਿੰਟਾਂ ਵਿੱਚ ਤਿਆਰ ਕਰੋ।' },
+    { id: '4', startTime: 12.4, endTime: 16.5, text: 'Simply upload your video, key in your API credentials, and click Transcribe.' },
+    { id: '5', startTime: 17.0, endTime: 21.2, text: 'ਸਾਡੇ ਨਾਲ ਆਟੋ-ਕੈਲੀਬ੍ਰੇਟਿਡ ਵੀਡੀਓਜ਼ ਦਾ ਆਨੰਦ ਲਓ।' },
+    { id: '6', startTime: 21.6, endTime: 26.0, text: 'Change styles, adjust offsets, and burn captions beautifully.' },
+    { id: '7', startTime: 26.5, endTime: 31.0, text: 'ਸਾਰਾ ਕੁਝ ਤੁਹਾਡੀ ਉਂਗਲਾਂ \'ਤੇ ਬਹੁਤ ਆਸਾਨ ਤਰੀਕੇ ਨਾਲ।' },
+    { id: '8', startTime: 31.5, endTime: 36.0, text: 'Export high-definition vertical reels or horizontal trailers with 1 click.' },
+    { id: '9', startTime: 36.5, endTime: 41.5, text: 'ਧੰਨਵਾਦ ਜੀ, ਸਾਡੇ ਨਾਲ ਜੁੜਨ ਲਈ ਅਤੇ ਇਸ ਦੀ ਵਰਤੋਂ ਕਰਨ ਲਈ!' }
   ]);
 
   // Transcribe Flow States
@@ -182,25 +536,24 @@ export default function App() {
   const [transcribeStatus, setTranscribeStatus] = useState('');
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
 
-  // Gemini manual spell check states
-  const [spellChecking, setSpellChecking] = useState<boolean>(false);
-  const [spellCheckError, setSpellCheckError] = useState<string | null>(null);
-  const [spellCheckSuccess, setSpellCheckSuccess] = useState<boolean>(false);
-  const [spellCheckStatus, setSpellCheckStatus] = useState<string>('');
-  const [spellCheckAudioGuided, setSpellCheckAudioGuided] = useState<boolean>(true);
+
 
   // Subtitle Custom Style configuration
   const [config, setConfig] = useState<BurnConfig>({
     fontSize: 26,
-    fontColor: '#facc15', // Neon yellow
+    fontColor: '#ffffff',
     backgroundColor: '#000000',
-    backgroundOpacity: 0.65,
+    backgroundOpacity: 0,
     strokeColor: '#000000',
-    strokeWidth: 3,
-    positionY: 82
+    strokeWidth: 3.5,
+    positionY: 80,
+    highlightType: 'word-scale',
+    activeWordColor: '#f43f5e',
+    activeWordBgColor: '#000000'
   });
 
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('bold-cinematic');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('bouncy-social-pink');
+  const [selectedPresetCategory, setSelectedPresetCategory] = useState<string>('💥 Active Word Zoom');
 
   // Video playback tracking helpers
   const [currentTime, setCurrentTime] = useState(0);
@@ -208,7 +561,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [latencyOffset, setLatencyOffset] = useState<number>(0.3);
 
-  // Synchronize active caption text with current time and segments using high-frequency requestAnimationFrame
+  // Synchronize active caption text with current time and segments using high-frequency requestAnimationFrame and native video events
   useEffect(() => {
     let rafId: number;
 
@@ -219,8 +572,7 @@ export default function App() {
       const time = video.currentTime;
       setCurrentTime(time);
 
-      // Change caption matching logic to this:
-      const lookAheadTime = video.currentTime + latencyOffset;
+      const lookAheadTime = time + latencyOffset;
       const matching = captions.find(c => 
         lookAheadTime >= c.startTime && 
         lookAheadTime < c.endTime
@@ -229,21 +581,44 @@ export default function App() {
       const nextText = matching ? matching.text : '';
       setActiveCaptionText(nextText);
 
-      if (isPlaying) {
+      if (isPlaying && !video.paused && !video.ended) {
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+        }
         rafId = requestAnimationFrame(syncSubtitles);
       }
     };
 
+    const video = videoRef.current;
+    if (video) {
+      video.addEventListener('timeupdate', syncSubtitles);
+      video.addEventListener('seeking', syncSubtitles);
+      video.addEventListener('seeked', syncSubtitles);
+      video.addEventListener('play', syncSubtitles);
+      video.addEventListener('pause', syncSubtitles);
+      video.addEventListener('ratechange', syncSubtitles);
+    }
+
     if (isPlaying) {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
       rafId = requestAnimationFrame(syncSubtitles);
     } else {
-      // Still sync when paused so editing or scratching the playhead updates immediately
       syncSubtitles();
     }
 
     return () => {
       if (rafId) {
         cancelAnimationFrame(rafId);
+      }
+      if (video) {
+        video.removeEventListener('timeupdate', syncSubtitles);
+        video.removeEventListener('seeking', syncSubtitles);
+        video.removeEventListener('seeked', syncSubtitles);
+        video.removeEventListener('play', syncSubtitles);
+        video.removeEventListener('pause', syncSubtitles);
+        video.removeEventListener('ratechange', syncSubtitles);
       }
     };
   }, [isPlaying, captions, videoUrl, currentStep, latencyOffset]);
@@ -376,38 +751,29 @@ export default function App() {
 
     try {
       let parsedCaptions: CaptionSegment[] = [];
+      let isGroqSuccessful = false;
 
       if (groqApiKey && groqApiKey.trim()) {
         setTranscribeStatus('Submitting raw video soundtrack to Groq Whisper v3 hardware accelerator...');
         setUploadProgress(40);
         
-        parsedCaptions = await generateTimestampedCaptionsGroq(
-          videoFile,
-          groqApiKey.trim(),
-          geminiApiKey.trim(),
-          captionLanguageMode
-        );
-        
-        setUploadProgress(90);
-        setTranscribeStatus('Preserving verbatim Groq timestamps & executing script mapper...');
-        
-        if (parsedCaptions && parsedCaptions.length > 0) {
-          const mappedCaptions = await mapCaptionsToSelectedScript(
-            parsedCaptions,
-            captionLanguageMode,
+        try {
+          parsedCaptions = await generateTimestampedCaptionsGroq(
+            videoFile,
+            groqApiKey.trim(),
             geminiApiKey.trim(),
-            (status) => setTranscribeStatus(status)
+            captionLanguageMode
           );
-          setCaptions(mappedCaptions);
-          setUploadProgress(100);
-          setTranscribeStatus('Successfully transcribed captions via Groq Whisper!');
-          // Deliberate sleep for visual confirmation
-          await new Promise(r => setTimeout(r, 800));
-          setCurrentStep(2); // Auto-progress to edit phase
-        } else {
-          throw new Error('No transcripts returned by the Groq Whisper backend.');
+          isGroqSuccessful = true;
+        } catch (groqErr: any) {
+          console.warn('Groq Whisper failed, trying fallback to Gemini:', groqErr);
+          setTranscribeStatus(`⚠️ Groq Whisper error: ${groqErr.message || 'Server Error'}. Auto-falling back to Gemini Core API...`);
+          await new Promise(r => setTimeout(r, 2500));
         }
-      } else {
+      }
+
+      // If we didn't use Groq, or if Groq failed and we have no parsedCaptions
+      if (!isGroqSuccessful) {
         setTranscribeStatus('Reading localized media file into memory...');
         setUploadProgress(25);
         
@@ -424,26 +790,36 @@ export default function App() {
           captionLanguageMode
         );
 
-        setUploadProgress(100);
+        setUploadProgress(90);
         setTranscribeStatus('Aligning audio timestamps and word layouts...');
 
         if (parsedCaptions && parsedCaptions.length > 0) {
           const calibrated = autoCalibrateCaptions(parsedCaptions);
-          const calibratedAndFixed = fixTimestamps(calibrated);
-          const mappedCaptions = await mapCaptionsToSelectedScript(
-            calibratedAndFixed,
-            captionLanguageMode,
-            geminiApiKey.trim(),
-            (status) => setTranscribeStatus(status)
-          );
-          setCaptions(mappedCaptions);
-          setTranscribeStatus('Successfully transcribed captions!');
-          // Deliberate sleep for visual confirmation
-          await new Promise(r => setTimeout(r, 800));
-          setCurrentStep(2); // Auto-progress to edit phase
+          parsedCaptions = fixTimestamps(calibrated);
         } else {
           throw new Error('No transcripts returned by the Gemini core script parser.');
         }
+      }
+
+      // Now process/map the captions (both Groq and Gemini need mapCaptionsToSelectedScript)
+      if (parsedCaptions && parsedCaptions.length > 0) {
+        setUploadProgress(92);
+        setTranscribeStatus('Preserving verbatim timestamps & executing script language mapper...');
+        const mappedCaptions = await mapCaptionsToSelectedScript(
+          parsedCaptions,
+          captionLanguageMode,
+          geminiApiKey.trim(),
+          (status) => setTranscribeStatus(status)
+        );
+        setCaptions(mappedCaptions);
+        setUploadProgress(100);
+        setTranscribeStatus(isGroqSuccessful ? 'Successfully transcribed captions via Groq Whisper!' : 'Successfully transcribed captions via Gemini fallback!');
+        
+        // Deliberate sleep for visual confirmation
+        await new Promise(r => setTimeout(r, 800));
+        setCurrentStep(2); // Auto-progress to edit phase
+      } else {
+        throw new Error('No transcripts returned by the transcribing engine.');
       }
     } catch (err: any) {
       console.error(err);
@@ -467,41 +843,7 @@ export default function App() {
     }));
   };
 
-  // Perform Spell Checking with Gemini manually
-  const handleSpellCheckWithGemini = async () => {
-    if (captions.length === 0) return;
-    setSpellChecking(true);
-    setSpellCheckError(null);
-    setSpellCheckSuccess(false);
-    setSpellCheckStatus('Preparing transcription segments for spellcheck...');
-
-    try {
-      const texts = captions.map(seg => seg.text);
-      const cleanedTexts = await correctCaptionsSpellingGemini(
-        texts,
-        captionLanguageMode,
-        geminiApiKey,
-        spellCheckAudioGuided ? videoFile : null,
-        (status) => setSpellCheckStatus(status)
-      );
-
-      setCaptions(prev => prev.map((seg, idx) => {
-        if (cleanedTexts[idx] !== undefined) {
-          return { ...seg, text: cleanedTexts[idx] };
-        }
-        return seg;
-      }));
-
-      setSpellCheckSuccess(true);
-      setTimeout(() => setSpellCheckSuccess(false), 4500);
-    } catch (err: any) {
-      console.error(err);
-      setSpellCheckError(err.message || 'Gemini spell-check execution failed.');
-    } finally {
-      setSpellChecking(false);
-      setSpellCheckStatus('');
-    }
-  };
+  // Left blank intentionally - spelling is handled automatically in the unified Groq + Gemini pipeline
 
   // Add individual segments
   const handleAddSegment = () => {
@@ -547,11 +889,12 @@ export default function App() {
     const baseText = activeSeg.text.trim();
     if (!baseText) return;
 
-    const sizeMultiplier = width / 640;
+    const isVideoVertical = height > width;
+    const referenceWidth = isVideoVertical ? 360 : 640;
+    const sizeMultiplier = width / referenceWidth;
     const calculatedFontSize = Math.max(14, Math.round(config.fontSize * sizeMultiplier));
     
     ctx.font = `bold ${calculatedFontSize}px 'Inter', system-ui, sans-serif`;
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     const paddingX = 24;
@@ -561,21 +904,21 @@ export default function App() {
 
     const maxWidth = width - 48;
     const words = baseText.split(' ');
-    const lines: string[] = [];
-    let currentLine = '';
 
-    for (let i = 0; i < words.length; i++) {
-      const testLine = currentLine ? currentLine + ' ' + words[i] : words[i];
-      const metrics = ctx.measureText(testLine);
-      if (metrics.width > maxWidth && i > 0) {
-        lines.push(currentLine);
-        currentLine = words[i];
-      } else {
-        currentLine = testLine;
-      }
-    }
-    if (currentLine) {
-      lines.push(currentLine);
+    // Calculate active word index for canvas on seek duration
+    const duration = activeSeg.endTime - activeSeg.startTime;
+    const progress = duration > 0 ? Math.max(0, Math.min(0.99, (lookAheadTime - activeSeg.startTime) / duration)) : 0;
+    const activeWordIndex = Math.floor(progress * words.length);
+
+    let lines: string[] = [];
+    // Clean, high-retention 2-lines layout constraint
+    if (words.length <= 3) {
+      lines = [baseText];
+    } else {
+      const mid = Math.ceil(words.length / 2);
+      const l1 = words.slice(0, mid).join(' ');
+      const l2 = words.slice(mid).join(' ');
+      lines = [l1, l2];
     }
 
     const lineHeight = calculatedFontSize * 1.35;
@@ -602,28 +945,215 @@ export default function App() {
       ctx.arcTo(bgX + bgW, bgY, bgX + bgW, bgY + bgH, r);
       ctx.arcTo(bgX + bgW, bgY + bgH, bgX, bgY + bgH, r);
       ctx.arcTo(bgX, bgY + bgH, bgX, bgY, r);
-      ctx.arcTo(bgX, bgY, bgX + bgW, bgY, r);
+      ctx.arcTo(bgX, bgY + bgX, bgX + bgW, bgY, r);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
     }
 
-    lines.forEach((line, index) => {
-      const lineY = y - (totalBoxHeight / 2) + (index * lineHeight) + (lineHeight / 2);
-      
-      if (config.strokeWidth > 0) {
-        ctx.strokeStyle = config.strokeColor || '#000000';
-        ctx.lineWidth = config.strokeWidth * sizeMultiplier;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(line, x, lineY);
-      }
+    if (config.highlightType !== 'none') {
+      let wordCounter = 0;
+      lines.forEach((line, index) => {
+        const lineY = y - (totalBoxHeight / 2) + (index * lineHeight) + (lineHeight / 2);
+        const lineWords = line.split(' ');
+        
+        // Dynamically compute exact total line width including scaled active word
+        let totalLineWidth = 0;
+        lineWords.forEach((word, idx) => {
+          const isWordActive = (wordCounter + idx) === activeWordIndex;
+          if (isWordActive && (config.highlightType === 'word-scale' || config.highlightType === 'hyper-reels')) {
+            ctx.font = `900 ${Math.round(calculatedFontSize * 1.35)}px 'Montserrat', sans-serif`;
+          } else if (isWordActive && config.highlightType === 'cursive-sandwich') {
+            ctx.font = `950 italic ${Math.round(calculatedFontSize * 1.45)}px 'Montserrat', sans-serif`;
+          } else if (config.highlightType === 'cursive-sandwich') {
+            ctx.font = `700 ${Math.round(calculatedFontSize * 0.9)}px 'Caveat', cursive`;
+          } else if (isWordActive && config.highlightType === 'karaoke-glow') {
+            ctx.font = `bold ${Math.round(calculatedFontSize * 1.12)}px 'Inter', system-ui, sans-serif`;
+          } else if (config.highlightType === 'hyper-reels') {
+            ctx.font = `900 ${calculatedFontSize}px 'Montserrat', sans-serif`;
+          } else {
+            ctx.font = `bold ${calculatedFontSize}px 'Inter', system-ui, sans-serif`;
+          }
+          totalLineWidth += ctx.measureText(word).width;
+          if (idx < lineWords.length - 1) {
+            if (config.highlightType === 'cursive-sandwich') {
+              ctx.font = `700 ${Math.round(calculatedFontSize * 0.9)}px 'Caveat', cursive`;
+            } else if (config.highlightType === 'hyper-reels') {
+              ctx.font = `900 ${calculatedFontSize}px 'Montserrat', sans-serif`;
+            } else {
+              ctx.font = `bold ${calculatedFontSize}px 'Inter', system-ui, sans-serif`;
+            }
+            totalLineWidth += ctx.measureText(' ').width;
+          }
+        });
 
-      ctx.fillStyle = config.fontColor || '#ffffff';
-      ctx.fillText(line, x, lineY);
-    });
+        let startX = x - totalLineWidth / 2;
+        let currentOffset = 0;
+        
+        ctx.textAlign = 'left';
+        if (config.highlightType === 'cursive-sandwich') {
+          ctx.font = `700 ${Math.round(calculatedFontSize * 0.9)}px 'Caveat', cursive`;
+        } else if (config.highlightType === 'hyper-reels') {
+          ctx.font = `900 ${calculatedFontSize}px 'Montserrat', sans-serif`;
+        } else {
+          ctx.font = `bold ${calculatedFontSize}px 'Inter', system-ui, sans-serif`;
+        }
+        const spaceWidth = ctx.measureText(' ').width;
+
+        lineWords.forEach((word) => {
+          const isActive = wordCounter === activeWordIndex;
+          if (isActive && (config.highlightType === 'word-scale' || config.highlightType === 'hyper-reels')) {
+            ctx.font = `900 ${Math.round(calculatedFontSize * 1.35)}px 'Montserrat', sans-serif`;
+          } else if (isActive && config.highlightType === 'cursive-sandwich') {
+            ctx.font = `950 italic ${Math.round(calculatedFontSize * 1.45)}px 'Montserrat', sans-serif`;
+          } else if (config.highlightType === 'cursive-sandwich') {
+            ctx.font = `700 ${Math.round(calculatedFontSize * 0.9)}px 'Caveat', cursive`;
+          } else if (isActive && config.highlightType === 'karaoke-glow') {
+            ctx.font = `bold ${Math.round(calculatedFontSize * 1.12)}px 'Inter', system-ui, sans-serif`;
+          } else if (config.highlightType === 'hyper-reels') {
+            ctx.font = `900 ${calculatedFontSize}px 'Montserrat', sans-serif`;
+          } else {
+            ctx.font = `bold ${calculatedFontSize}px 'Inter', system-ui, sans-serif`;
+          }
+
+          const wordWidth = ctx.measureText(word).width;
+          const wordX = startX + currentOffset;
+          
+          wordCounter++;
+
+          ctx.save();
+          // Adjust canvas context variables based on different highlight types
+          if (isActive) {
+            if (config.highlightType === 'word-bg' || config.highlightType === 'podcast-pill') {
+              ctx.fillStyle = config.activeWordBgColor || '#facc15';
+              const rx = wordX - (config.highlightType === 'podcast-pill' ? 8 : 4);
+              const ry = lineY - calculatedFontSize / 2 - (config.highlightType === 'podcast-pill' ? 5 : 2);
+              const rw = wordWidth + (config.highlightType === 'podcast-pill' ? 16 : 8);
+              const rh = calculatedFontSize + (config.highlightType === 'podcast-pill' ? 10 : 4);
+              const radius = config.highlightType === 'podcast-pill' ? rh / 2 : 5;
+              
+              ctx.beginPath();
+              ctx.moveTo(rx + radius, ry);
+              ctx.arcTo(rx + rw, ry, rx + rw, ry + rh, radius);
+              ctx.arcTo(rx + rw, ry + rh, rx, ry + rh, radius);
+              ctx.arcTo(rx, ry + rh, rx, ry, radius);
+              ctx.arcTo(rx, ry, rx + rw, ry, radius);
+              ctx.closePath();
+              ctx.fill();
+
+              // Draw word text
+              ctx.fillStyle = config.activeWordColor || '#000000';
+              ctx.fillText(word, wordX, lineY);
+            } else if (config.highlightType === 'word-color') {
+              if (config.strokeWidth > 0) {
+                ctx.strokeStyle = config.strokeColor || '#000000';
+                ctx.lineWidth = config.strokeWidth * sizeMultiplier;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(word, wordX, lineY);
+              }
+              ctx.fillStyle = config.activeWordColor || '#facc15';
+              ctx.fillText(word, wordX, lineY);
+            } else if (config.highlightType === 'karaoke-glow') {
+              ctx.shadowColor = config.activeWordColor || '#22d3ee';
+              ctx.shadowBlur = 12 * sizeMultiplier;
+              ctx.font = `bold ${Math.round(calculatedFontSize * 1.12)}px 'Inter', system-ui, sans-serif`;
+              
+              if (config.strokeWidth > 0) {
+                ctx.strokeStyle = config.strokeColor || '#000000';
+                ctx.lineWidth = config.strokeWidth * sizeMultiplier;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(word, wordX, lineY);
+              }
+              ctx.fillStyle = config.activeWordColor || '#22d3ee';
+              ctx.fillText(word, wordX, lineY);
+            } else if (config.highlightType === 'word-scale') {
+              // Word Scale Pop Active State
+              ctx.font = `900 ${Math.round(calculatedFontSize * 1.35)}px 'Montserrat', sans-serif`;
+              
+              if (config.strokeWidth > 0) {
+                ctx.strokeStyle = config.strokeColor || '#000000';
+                ctx.lineWidth = (config.strokeWidth + 1) * sizeMultiplier;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(word, wordX, lineY);
+              }
+              ctx.fillStyle = config.activeWordColor || '#FFFF00';
+              ctx.fillText(word, wordX, lineY);
+            } else if (config.highlightType === 'hyper-reels') {
+              // Neon Outer Glow + Rotated Tilt pop (Panel 3 / Panel 1)
+              ctx.shadowColor = config.activeWordColor || '#00FF00';
+              ctx.shadowBlur = 18 * sizeMultiplier;
+              ctx.font = `900 italic ${Math.round(calculatedFontSize * 1.45)}px 'Montserrat', sans-serif`;
+              
+              if (config.strokeWidth > 0) {
+                ctx.strokeStyle = config.strokeColor || '#000000';
+                ctx.lineWidth = (config.strokeWidth + 2) * sizeMultiplier;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(word, wordX, lineY);
+              }
+              ctx.fillStyle = config.activeWordColor || '#00FF00';
+              ctx.fillText(word, wordX, lineY);
+            } else if (config.highlightType === 'cursive-sandwich') {
+              // Giant bold yellow/pink uppercase accent core (Panel 2)
+              ctx.font = `950 italic ${Math.round(calculatedFontSize * 1.45)}px 'Montserrat', sans-serif`;
+              
+              if (config.strokeWidth > 0) {
+                ctx.strokeStyle = config.strokeColor || '#000000';
+                ctx.lineWidth = (config.strokeWidth + 2.5) * sizeMultiplier;
+                ctx.lineJoin = 'round';
+                ctx.strokeText(word, wordX, lineY);
+              }
+              ctx.fillStyle = config.activeWordColor || '#FFFF00';
+              ctx.fillText(word, wordX, lineY);
+            }
+          } else {
+            // Non-active word handling
+            if (config.highlightType === 'karaoke-glow') {
+              ctx.globalAlpha = 0.55;
+            } else if (config.highlightType === 'word-scale' || config.highlightType === 'hyper-reels') {
+              ctx.globalAlpha = 0.65; // subtle fade so active word pops dramatically!
+            } else if (config.highlightType === 'cursive-sandwich') {
+              ctx.globalAlpha = 0.75; // warm cursive fallback
+            }
+            if (config.highlightType === 'cursive-sandwich') {
+              ctx.font = `700 ${Math.round(calculatedFontSize * 0.9)}px 'Caveat', cursive`;
+            } else if (config.highlightType === 'hyper-reels') {
+              ctx.font = `900 ${calculatedFontSize}px 'Montserrat', sans-serif`;
+            } else {
+              ctx.font = `bold ${calculatedFontSize}px 'Inter', system-ui, sans-serif`;
+            }
+            if (config.strokeWidth > 0) {
+              ctx.strokeStyle = config.strokeColor || '#000000';
+              ctx.lineWidth = config.strokeWidth * sizeMultiplier;
+              ctx.lineJoin = 'round';
+              ctx.strokeText(word, wordX, lineY);
+            }
+            ctx.fillStyle = config.fontColor || '#ffffff';
+            ctx.fillText(word, wordX, lineY);
+          }
+          ctx.restore();
+
+          currentOffset += wordWidth + spaceWidth;
+        });
+      });
+    } else {
+      ctx.textAlign = 'center';
+      lines.forEach((line, index) => {
+        const lineY = y - (totalBoxHeight / 2) + (index * lineHeight) + (lineHeight / 2);
+        
+        if (config.strokeWidth > 0) {
+          ctx.strokeStyle = config.strokeColor || '#000000';
+          ctx.lineWidth = config.strokeWidth * sizeMultiplier;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(line, x, lineY);
+        }
+
+        ctx.fillStyle = config.fontColor || '#ffffff';
+        ctx.fillText(line, x, lineY);
+      });
+    }
   };
 
-  // High performance Canvas Media Recorder exporter
+  // High performance Canvas Media Recorder exporter (Real-time playback sync)
   const handleBurnAndExport = async () => {
     if (!videoUrl) return;
 
@@ -635,8 +1165,38 @@ export default function App() {
     const exportVideo = document.createElement('video');
     exportVideo.src = videoUrl;
     exportVideo.crossOrigin = 'anonymous';
-    exportVideo.muted = true;
+    // Keep unmuted at 0 volume for optimal audio capture reliability on Chromium and secondary browsers
+    exportVideo.muted = false;
+    exportVideo.volume = 0;
     exportVideo.playsInline = true;
+
+    // Standard high-reliability styling to keep video rendering in DOM active without browser background throttling
+    exportVideo.style.position = 'fixed';
+    exportVideo.style.top = '0';
+    exportVideo.style.left = '0';
+    exportVideo.style.width = '1px';
+    exportVideo.style.height = '1px';
+    exportVideo.style.opacity = '0.01';
+    exportVideo.style.pointerEvents = 'none';
+    exportVideo.style.zIndex = '-9999';
+    document.body.appendChild(exportVideo);
+
+    let recorder: MediaRecorder | null = null;
+    let animationFrameId: number | null = null;
+
+    const cleanup = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+      try {
+        exportVideo.pause();
+      } catch (e) {}
+      if (exportVideo.parentNode) {
+        exportVideo.parentNode.removeChild(exportVideo);
+      }
+      setIsExporting(false);
+    };
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -659,12 +1219,29 @@ export default function App() {
       setExportStatus('Assembling canvas recording multiplexer...');
       const canvasStream = canvas.captureStream(30);
 
+      // Attempt high-fidelity audio capture track injection
+      try {
+        const videoStream = (exportVideo as any).captureStream 
+          ? (exportVideo as any).captureStream() 
+          : (exportVideo as any).mozCaptureStream 
+            ? (exportVideo as any).mozCaptureStream() 
+            : null;
+        if (videoStream) {
+          const audioTracks = videoStream.getAudioTracks();
+          if (audioTracks.length > 0) {
+            canvasStream.addTrack(audioTracks[0]);
+          }
+        }
+      } catch (audioErr) {
+        console.warn('Audio track capture bypass launched:', audioErr);
+      }
+
       let mimeType = 'video/webm;codecs=vp8';
       if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/mp4';
       if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
 
       const chunks: Blob[] = [];
-      const recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : undefined);
+      recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : undefined);
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -672,67 +1249,141 @@ export default function App() {
         }
       };
 
-      const renderFPS = 25;
-      const frameDelay = 1000 / renderFPS;
-      const step = 1 / renderFPS;
-      let currentRenderTime = 0;
-
-      recorder.start();
-      setExportStatus('Burning subtitles into frame tracks...');
-
-      const executeRenderStep = async () => {
-        if (currentRenderTime >= duration) {
-          setExportStatus('Compiling video segments...');
-          recorder.stop();
-          
-          await new Promise(r => setTimeout(r, 1200));
-          
-          const exportedBlob = new Blob(chunks, { type: chunks[0]?.type || 'video/webm' });
-          const exportUrl = URL.createObjectURL(exportedBlob);
-          
-          const link = document.createElement('a');
-          link.href = exportUrl;
-          link.download = `syncscript-burned-${Date.now()}.${chunks[0]?.type?.includes('mp4') ? 'mp4' : 'webm'}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-
-          setIsExporting(false);
-          setExportProgress(100);
-          setExportStatus('Subtitle burn complete! File downloaded safely.');
+      // Set up a promise that resolves only when the recorder has stopped fully and finished processing chunks
+      const recorderStoppedPromise = new Promise<void>((resolveStopped) => {
+        if (!recorder) {
+          resolveStopped();
           return;
         }
+        recorder.onstop = () => {
+          resolveStopped();
+        };
+      });
 
-        exportVideo.currentTime = currentRenderTime;
+      // Set currentTime to start
+      exportVideo.currentTime = 0;
+      await new Promise<void>((resolve) => {
+        const onSeek = () => {
+          exportVideo.removeEventListener('seeked', onSeek);
+          resolve();
+        };
+        exportVideo.addEventListener('seeked', onSeek);
+      });
 
-        await new Promise<void>((resolve) => {
-          const onSeek = () => {
-            exportVideo.removeEventListener('seeked', onSeek);
-            resolve();
-          };
-          exportVideo.addEventListener('seeked', onSeek);
-        });
+      // Start the media recorder
+      recorder.start();
+      setExportStatus('Burning subtitles in real-time...');
 
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, videoWidth, videoHeight);
-        ctx.drawImage(exportVideo, 0, 0, videoWidth, videoHeight);
+      // Running play loop with timing control
+      await new Promise<void>((resolveRender, rejectRender) => {
+        const FPS = 30;
+        const frameInterval = 1000 / FPS;
+        let lastFrameTime = performance.now();
+        let isDone = false;
 
-        drawSubtitlesOnCanvas(ctx, videoWidth, videoHeight, currentRenderTime);
+        const checkEnd = () => {
+          if (isDone) return;
+          if (exportVideo.ended || exportVideo.currentTime >= duration - 0.05) {
+            isDone = true;
+            resolveRender();
+          }
+        };
 
-        currentRenderTime += step;
-        const percent = Math.min(99, Math.round((currentRenderTime / duration) * 100));
-        setExportProgress(percent);
-        setExportStatus(`Burning frames: ${percent}%`);
+        const renderLoop = (now: number) => {
+          if (isDone) return;
 
-        setTimeout(executeRenderStep, frameDelay);
-      };
+          checkEnd();
+          if (isDone) return;
 
-      executeRenderStep();
+          const elapsed = now - lastFrameTime;
+          if (elapsed >= frameInterval) {
+            lastFrameTime = now - (elapsed % frameInterval);
+
+            // Render video frame on high resolution canvas
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, videoWidth, videoHeight);
+            try {
+              ctx.drawImage(exportVideo, 0, 0, videoWidth, videoHeight);
+            } catch (e) {
+              console.warn('Failed to draw current frame:', e);
+            }
+
+            // Draw verbatim scaled subtitle overlays
+            drawSubtitlesOnCanvas(ctx, videoWidth, videoHeight, exportVideo.currentTime);
+
+            // Track proportional export progress matching the play clock
+            const percentage = Math.min(99, Math.round((exportVideo.currentTime / duration) * 100));
+            setExportProgress(percentage);
+            setExportStatus(`Burning frames: ${percentage}%`);
+          }
+
+          animationFrameId = requestAnimationFrame(renderLoop);
+        };
+
+        exportVideo.onended = () => {
+          if (!isDone) {
+            isDone = true;
+            resolveRender();
+          }
+        };
+
+        exportVideo.onerror = (err) => {
+          isDone = true;
+          rejectRender(new Error('Playback failure during export: ' + String(err)));
+        };
+
+        // Start video playback
+        exportVideo.play()
+          .then(() => {
+            animationFrameId = requestAnimationFrame(renderLoop);
+          })
+          .catch((err) => {
+            rejectRender(new Error('Failed to initiate video playback: ' + err.message));
+          });
+      });
+
+      // Once the playback loop finishes, cancel remaining anim frames immediately
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+
+      setExportProgress(99);
+      setExportStatus('Completing remaining audio encodes...');
+
+      // Stop recorder and wait asynchronously for onstop to trigger
+      if (recorder && recorder.state !== 'inactive') {
+        recorder.stop();
+      }
+      
+      // Wait for all chunks to get fully compiled by MediaRecorder
+      await recorderStoppedPromise;
+
+      setExportStatus('Compiling video segments...');
+      await new Promise(r => setTimeout(r, 600));
+
+      if (chunks.length === 0) {
+        throw new Error('No video frame segments were compiled during recording.');
+      }
+
+      const exportedBlob = new Blob(chunks, { type: chunks[0]?.type || 'video/webm' });
+      const exportUrl = URL.createObjectURL(exportedBlob);
+      
+      const link = document.createElement('a');
+      link.href = exportUrl;
+      link.download = `syncscript-burned-${Date.now()}.${chunks[0]?.type?.includes('mp4') ? 'mp4' : 'webm'}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setExportProgress(100);
+      setExportStatus('Subtitle burn complete! File downloaded safely.');
 
     } catch (err: any) {
       console.error('Export run error:', err);
       alert(`Render error: ${err.message || err}`);
-      setIsExporting(false);
+    } finally {
+      cleanup();
     }
   };
 
@@ -742,7 +1393,14 @@ export default function App() {
     setIsVertical(false);
     setCaptions([
       { id: '1', startTime: 1.2, endTime: 4.5, text: 'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ, ਸਵਾਗਤ ਹੈ ਤੁਹਾਡਾ!' },
-      { id: '2', startTime: 4.8, endTime: 8.0, text: 'Today we are burning dynamic Punjabi subtitles on the fly.' }
+      { id: '2', startTime: 4.8, endTime: 8.0, text: 'Today we are burning dynamic Punjabi subtitles on the fly.' },
+      { id: '3', startTime: 8.3, endTime: 12.0, text: 'ਪ੍ਰੋਫੈਸ਼ਨਲ ਵੀਡੀਓ ਸਬਟਾਈਟਲਸ ਹੁਣ ਮਿੰਟਾਂ ਵਿੱਚ ਤਿਆਰ ਕਰੋ।' },
+      { id: '4', startTime: 12.4, endTime: 16.5, text: 'Simply upload your video, key in your API credentials, and click Transcribe.' },
+      { id: '5', startTime: 17.0, endTime: 21.2, text: 'ਸਾਡੇ ਨਾਲ ਆਟੋ-ਕੈਲੀਬ੍ਰੇਟਿਡ ਵੀਡੀਓਜ਼ ਦਾ ਆਨੰਦ ਲਓ।' },
+      { id: '6', startTime: 21.6, endTime: 26.0, text: 'Change styles, adjust offsets, and burn captions beautifully.' },
+      { id: '7', startTime: 26.5, endTime: 31.0, text: 'ਸਾਰਾ ਕੁਝ ਤੁਹਾਡੀ ਉਂਗਲਾਂ \'ਤੇ ਬਹੁਤ ਆਸਾਨ ਤਰੀਕੇ ਨਾਲ।' },
+      { id: '8', startTime: 31.5, endTime: 36.0, text: 'Export high-definition vertical reels or horizontal trailers with 1 click.' },
+      { id: '9', startTime: 36.5, endTime: 41.5, text: 'ਧੰਨਵਾਦ ਜੀ, ਸਾਡੇ ਨਾਲ ਜੁੜਨ ਲਈ ਅਤੇ ਇਸ ਦੀ ਵਰਤੋਂ ਕਰਨ ਲਈ!' }
     ]);
     setCurrentStep(1);
     setIsExporting(false);
@@ -754,6 +1412,18 @@ export default function App() {
     const lookAheadTime = currentTime + latencyOffset;
     return lookAheadTime >= c.startTime && lookAheadTime < c.endTime;
   });
+
+  // Calculate split-word progress and active index for dynamic spoken highlighting
+  const activeCaptionSplits = (() => {
+    if (!currentActiveCaption) return { words: [], activeIndex: -1 };
+    const words = currentActiveCaption.text.trim().split(/\s+/);
+    const duration = currentActiveCaption.endTime - currentActiveCaption.startTime;
+    const progress = duration > 0 
+      ? Math.max(0, Math.min(0.99, (currentTime + latencyOffset - currentActiveCaption.startTime) / duration))
+      : 0;
+    const activeIndex = Math.floor(progress * words.length);
+    return { words, activeIndex };
+  })();
 
   return (
     <div id="app-root" className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-indigo-500/35 selection:text-indigo-200">
@@ -1088,73 +1758,15 @@ export default function App() {
               </button>
             </div>
 
-            {/* GEMINI SPELL-CHECK CONTROL BOX */}
-            <div className="bg-neutral-950 border border-neutral-850 p-4 rounded-2xl space-y-3.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-850">
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-neutral-250 uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" /> Correct Spelling with Gemini
-                  </h4>
-                  <p className="text-[11px] text-neutral-400 leading-relaxed">
-                    Fix spelling slips, phonetic typos, and grammar errors in <span className="text-amber-400 font-semibold">{captionLanguageMode}</span> directly. Timestamps and structures remain completely unchanged.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSpellCheckWithGemini}
-                  disabled={spellChecking || captions.length === 0}
-                  className="bg-amber-500 text-neutral-950 font-black text-xs uppercase px-4 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all hover:bg-amber-400 disabled:opacity-55 disabled:cursor-not-allowed shrink-0 cursor-pointer shadow-lg shadow-amber-500/10"
-                >
-                  {spellChecking ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5 text-neutral-950 fill-neutral-950" />
-                      <span>Correct Spelling</span>
-                    </>
-                  )}
-                </button>
+            {/* INFO BOX INDICATING THE COMBINED AUTOMATIC PIPELINE */}
+            <div className="bg-neutral-950/60 border border-neutral-850 p-4 rounded-2xl flex items-center gap-3">
+              <Sparkles className="w-5 h-5 text-amber-400 shrink-0 fill-amber-400/10 animate-pulse" />
+              <div className="space-y-0.5">
+                <h4 className="text-[11px] font-bold text-neutral-200 uppercase tracking-widest">Wording & Spacing Calibrated</h4>
+                <p className="text-[10px] text-neutral-450 leading-relaxed">
+                  Groq Whisper v3 and Google Gemini-3.5-flash collaborated automatically to generate highly professional, perfectly spelled caption text matching your timeline.
+                </p>
               </div>
-
-              {/* AUDIO GUIDED TOGGLE ACCENT CONTROL */}
-              <div className="flex items-start sm:items-center gap-2.5 py-0.5">
-                <input
-                  type="checkbox"
-                  id="audioGuidedSpellcheck"
-                  checked={spellCheckAudioGuided}
-                  onChange={(e) => setSpellCheckAudioGuided(e.target.checked)}
-                  disabled={spellChecking}
-                  className="mt-0.5 sm:mt-0 rounded border-neutral-800 bg-neutral-900 text-amber-500 accent-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer disabled:opacity-50"
-                />
-                <label htmlFor="audioGuidedSpellcheck" className="text-[11px] text-neutral-300 cursor-pointer select-none leading-relaxed flex flex-col">
-                  <span>
-                    🎙️ <strong className="text-amber-400 font-bold uppercase tracking-wider text-[10px]">Active Voice Alignment (Listen to Sound):</strong> Let Gemini listen to the original video soundtrack to correct spelling mistakes based on speaking phonemes rather than text guesses only.
-                  </span>
-                </label>
-              </div>
-
-              {/* Status and Notifications */}
-              {spellChecking && (
-                <div className="text-[11px] text-amber-300 bg-amber-500/5 px-3 py-2 rounded-lg border border-amber-500/10 flex items-center gap-2">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>{spellCheckStatus || 'Analyzing transcription and proofreading via Gemini-2.0-flash...'}</span>
-                </div>
-              )}
-
-              {spellCheckSuccess && (
-                <div className="text-[11px] text-emerald-400 bg-emerald-500/5 px-3 py-2 rounded-lg border border-emerald-500/15">
-                  ✓ Spell-check refinement completed successfully!
-                </div>
-              )}
-
-              {spellCheckError && (
-                <div className="text-[11px] text-red-400 bg-red-500/5 px-3 py-2 rounded-lg border border-red-500/15">
-                  ⚠ Spellcheck Error: {spellCheckError}
-                </div>
-              )}
             </div>
 
             {/* EDITABLE SEGMENTS LIST */}
@@ -1271,40 +1883,284 @@ export default function App() {
               </p>
             </div>
 
+            {/* CATEGORY SWITCHER TABS */}
+            <div className="flex flex-wrap gap-1.5 p-1 bg-neutral-950 border border-neutral-850 rounded-2xl">
+              {[
+                '💥 Active Word Zoom',
+                '🔥 Reels & Shorts',
+                '⚡ Neon Glow',
+                '🎙️ Vlog & Podcast',
+                '🎞️ Cinematic & Clean'
+              ].map((cat) => {
+                const isCatActive = selectedPresetCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPresetCategory(cat);
+                      const firstInCat = PRESETS.find(p => p.category === cat);
+                      if (firstInCat) {
+                        applyStylePreset(firstInCat);
+                      }
+                    }}
+                    className={`flex-1 text-center py-2 px-3 rounded-xl text-[10px] font-black tracking-wider uppercase transition-all whitespace-nowrap cursor-pointer ${
+                      isCatActive 
+                        ? 'bg-amber-500 text-neutral-950 shadow-md shadow-amber-500/10' 
+                        : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-900/60'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
+
             {/* PRESET CHIPS GRID */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {PRESETS.map((preset) => {
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {PRESETS.filter(p => p.category === selectedPresetCategory).map((preset) => {
                 const isSelected = selectedPresetId === preset.id;
+                const { fontColor, strokeColor, strokeWidth, highlightType, activeWordColor, activeWordBgColor } = preset.config;
+                
+                const textShadowStyle = strokeWidth > 0 
+                  ? `0px 0px ${strokeWidth}px ${strokeColor}, 1px 1px 1.5px ${strokeColor}, -1px -1px 1.5px ${strokeColor}` 
+                  : 'none';
+
                 return (
                   <button
                     key={preset.id}
+                    type="button"
                     onClick={() => applyStylePreset(preset)}
-                    className={`p-4 rounded-2xl border text-left flex flex-col justify-between space-y-3 transition-all ${
+                    className={`p-3 rounded-2xl border text-left flex flex-col space-y-3 transition-all outline-none relative cursor-pointer ${
                       isSelected 
-                        ? 'bg-indigo-600/10 border-indigo-500 ring-1 ring-indigo-500/20' 
+                        ? 'bg-neutral-950 border-amber-500 ring-2 ring-amber-500/10' 
                         : 'bg-neutral-950 border-neutral-850 hover:border-neutral-700'
                     }`}
                   >
-                    <div>
-                      <h4 className="text-xs font-bold text-neutral-200">{preset.name}</h4>
-                      <p className="text-[10px] text-neutral-450 leading-normal pt-1">{preset.description}</p>
+                    {/* SIMULATED VERTICAL VIDEO PREVIEW SCREEN */}
+                    <div className="w-full h-40 rounded-xl bg-neutral-900 border border-neutral-850 relative overflow-hidden flex flex-col justify-between p-2.5 select-none">
+                      
+                      {/* Dark ambient overlay screen */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 via-neutral-900/60 to-neutral-950/70"></div>
+                      
+                      {/* Visual ambient light burst from the active word hue */}
+                      <div 
+                        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 blur-2xl opacity-15 rounded-full"
+                        style={{
+                          backgroundColor: highlightType !== 'none' ? activeWordColor : fontColor
+                        }}
+                      />
+
+                      {/* Header elements of simulated Reel */}
+                      <div className="flex items-center justify-between z-10 w-full">
+                        <div className="flex items-center gap-1 bg-black/60 px-1 py-0.5 rounded text-[7px] font-mono tracking-wider text-neutral-300 font-bold border border-neutral-800">
+                          <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></span>
+                          <span>LIVE</span>
+                        </div>
+                        <div className="text-[7px] font-mono text-neutral-400">9:16 HD</div>
+                      </div>
+
+                      {/* Right sidebar quick interaction widget */}
+                      <div className="absolute right-2 top-1/4 flex flex-col items-center gap-1.5 z-10 opacity-60">
+                        <div className="w-4 h-4 bg-neutral-950/70 border border-neutral-850 rounded-full flex items-center justify-center text-[6px]">❤️</div>
+                        <div className="w-4 h-4 bg-neutral-950/70 border border-neutral-850 rounded-full flex items-center justify-center text-[6px]">💬</div>
+                      </div>
+
+                      {/* HYBRID LIVE PREVIEW TEXT */}
+                      <div className="w-full flex flex-col items-center text-center justify-center space-y-1.5 py-1 my-auto z-10">
+                        {/* English Line */}
+                        <div className="flex flex-wrap items-center justify-center gap-x-1 font-sans text-[10px] font-black tracking-wide leading-none uppercase">
+                          <span style={{ color: fontColor, textShadow: textShadowStyle }}>To</span>
+                          
+                          {highlightType === 'word-bg' ? (
+                            <span 
+                              className="px-1.5 py-0.5 text-[9px] font-black rounded"
+                              style={{ 
+                                color: activeWordColor, 
+                                backgroundColor: activeWordBgColor,
+                                textShadow: 'none'
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : highlightType === 'podcast-pill' ? (
+                            <span 
+                              className="px-2 py-0.5 text-[9px] font-black rounded-full border border-white/5 shadow-md scale-105"
+                              style={{ 
+                                color: activeWordColor, 
+                                backgroundColor: activeWordBgColor,
+                                textShadow: 'none'
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : highlightType === 'word-color' ? (
+                            <span 
+                              className="font-extrabold"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: textShadowStyle 
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : highlightType === 'karaoke-glow' ? (
+                            <span 
+                              className="scale-105 font-black shrink-0 tracking-wider"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: `0 0 8px ${activeWordColor}, 0 0 1.5px ${activeWordColor}` 
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : highlightType === 'word-scale' ? (
+                            <span 
+                              className="font-black shrink-0 tracking-wider inline-block font-sans"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: strokeWidth > 0 ? `0 0 ${strokeWidth+1}px ${strokeColor}, 1px 1.5px 3px rgba(0,0,0,0.8)` : '0 2px 4px rgba(0,0,0,0.8)',
+                                transform: 'scale(1.3) rotate(-2deg)'
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : highlightType === 'hyper-reels' ? (
+                            <span 
+                              className="font-black italic shrink-0 tracking-tight inline-block font-sans"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: `0 0 14px ${activeWordColor}, 0 0 ${strokeWidth+1.5}px ${strokeColor || '#000000'}`,
+                                transform: 'scale(1.35) rotate(-3deg)'
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : highlightType === 'cursive-sandwich' ? (
+                            <span 
+                              className="font-black italic shrink-0 tracking-tight inline-block font-sans"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: `0 0 ${strokeWidth+2.5}px ${strokeColor || '#000000'}, 2px 2px 4px rgba(0,0,0,0.9)`,
+                                transform: 'scale(1.38) rotate(-4deg)'
+                              }}
+                            >
+                              GET
+                            </span>
+                          ) : (
+                            <span style={{ color: fontColor, textShadow: textShadowStyle }}>GET</span>
+                          )}
+
+                          <span style={{ color: fontColor, textShadow: textShadowStyle }}>STARTED</span>
+                        </div>
+
+                        {/* Punjabi Gurmukhi Line */}
+                        <div className="flex flex-wrap items-center justify-center gap-x-1 text-[10px] font-bold tracking-tight leading-none">
+                          <span style={{ color: fontColor, textShadow: textShadowStyle }}>ਆਓ</span>
+
+                          {highlightType === 'word-bg' ? (
+                            <span 
+                              className="px-1.5 py-0.5 text-[9px] font-bold rounded"
+                              style={{ 
+                                color: activeWordColor, 
+                                backgroundColor: activeWordBgColor,
+                                textShadow: 'none'
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : highlightType === 'podcast-pill' ? (
+                            <span 
+                              className="px-2 py-0.5 text-[9px] font-extrabold rounded-full scale-105"
+                              style={{ 
+                                color: activeWordColor, 
+                                backgroundColor: activeWordBgColor,
+                                textShadow: 'none'
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : highlightType === 'word-color' ? (
+                            <span 
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: textShadowStyle 
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : highlightType === 'karaoke-glow' ? (
+                            <span 
+                              className="scale-105"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: `0 0 8px ${activeWordColor}, 0 0 1.5px ${activeWordColor}` 
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : highlightType === 'word-scale' ? (
+                            <span 
+                              className="font-bold shrink-0 inline-block font-sans"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: strokeWidth > 0 ? `0 0 ${strokeWidth+1}px ${strokeColor}, 1px 1.5px 3px rgba(0,0,0,0.8)` : '0 2px 4px rgba(0,0,0,0.8)',
+                                transform: 'scale(1.3) rotate(-2deg)'
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : highlightType === 'hyper-reels' ? (
+                            <span 
+                              className="font-black italic shrink-0 inline-block font-sans"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: `0 0 14px ${activeWordColor}, 0 0 ${strokeWidth+1.5}px ${strokeColor || '#000000'}`,
+                                transform: 'scale(1.35) rotate(-3deg)'
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : highlightType === 'cursive-sandwich' ? (
+                            <span 
+                              className="font-black italic shrink-0 inline-block font-sans"
+                              style={{ 
+                                color: activeWordColor, 
+                                textShadow: `0 0 ${strokeWidth+2.5}px ${strokeColor || '#000000'}, 2px 2px 4px rgba(0,0,0,0.9)`,
+                                transform: 'scale(1.38) rotate(-4deg)'
+                              }}
+                            >
+                              ਸ਼ੁਰੂ
+                            </span>
+                          ) : (
+                            <span style={{ color: fontColor, textShadow: textShadowStyle }}>ਸ਼ੁਰੂ</span>
+                          )}
+
+                          <span style={{ color: fontColor, textShadow: textShadowStyle }}>ਕਰੀਏ</span>
+                        </div>
+                      </div>
+
+                      {/* Footer elements representing account labels */}
+                      <div className="flex items-center gap-1 z-10 w-full text-left">
+                        <div className="w-3.5 h-3.5 bg-amber-500 rounded-full flex items-center justify-center text-[7px] font-black shrink-0 text-black">S</div>
+                        <div className="truncate flex flex-col">
+                          <span className="text-[7px] font-bold text-neutral-300">@creator_sub</span>
+                          <span className="text-[6px] text-neutral-500 truncate">Original Sound • Punjabi Style</span>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* MINI VISUAL DEMO BLOCK */}
-                    <div className="h-10 w-full bg-neutral-900 rounded border border-neutral-850 flex items-center justify-center p-2 text-center select-none">
-                      <span 
-                        className="text-[11px] font-bold leading-none truncate max-w-full"
-                        style={{
-                          fontSize: '11px',
-                          color: preset.config.fontColor,
-                          textShadow: preset.config.strokeWidth > 0 ? `0 0 ${preset.config.strokeWidth}px ${preset.config.strokeColor}` : 'none',
-                          backgroundColor: preset.config.backgroundOpacity > 0 ? `${preset.config.backgroundColor}${Math.round(preset.config.backgroundOpacity * 255).toString(16).padStart(2, '0')}` : 'transparent',
-                          padding: preset.config.backgroundOpacity > 0 ? '2px 6px' : '0',
-                          borderRadius: '4px'
-                        }}
-                      >
-                        ਹੈਲੋ ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ
-                      </span>
+                    {/* TEXT DESCRIPTION LAYOUTS */}
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-neutral-250 truncate pr-2">{preset.name}</h4>
+                        {isSelected && (
+                          <span className="text-[8px] bg-amber-500/10 text-amber-400 font-bold uppercase py-0.5 px-1.5 rounded border border-amber-500/20 shrink-0">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-neutral-450 leading-relaxed line-clamp-2">{preset.description}</p>
                     </div>
                   </button>
                 );
@@ -1363,6 +2219,56 @@ export default function App() {
                     onChange={(e) => setConfig(prev => ({ ...prev, positionY: parseInt(e.target.value) || 82 }))}
                     className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs font-mono text-neutral-200 outline-none"
                   />
+                </div>
+
+                {/* ACTIVE WORD HIGHLIGHTING CONTROLS */}
+                <div className="col-span-2 border-t border-neutral-900 pt-3 mt-1 space-y-3">
+                  <div className="space-y-1">
+                    <span className="block text-[8px] font-mono text-neutral-400 font-bold uppercase tracking-wider">Dynamic Word Highlight Effect</span>
+                    <select
+                      value={config.highlightType}
+                      onChange={(e) => setConfig(prev => ({ 
+                        ...prev, 
+                        highlightType: e.target.value as any 
+                      }))}
+                      className="w-full bg-neutral-900 border border-neutral-800 rounded px-3 py-2 text-xs font-semibold text-neutral-200 outline-none focus:border-indigo-550 transition-colors"
+                    >
+                      <option value="none">None (Standard captions)</option>
+                      <option value="word-bg">🔥 Active Word Background Capsule</option>
+                      <option value="podcast-pill">🎙️ Podcast Pill Capsule</option>
+                      <option value="word-color">✨ Spoken Word Text Color</option>
+                      <option value="karaoke-glow">⚡ Karaoke Pulsing Glow</option>
+                      <option value="word-scale">💥 Active Word Zoom / Bouncy Scale</option>
+                      <option value="hyper-reels">✨ Pro High-Retention Reels Glow</option>
+                      <option value="cursive-sandwich">👑 Premium Cursive Sandwich Accent</option>
+                    </select>
+                  </div>
+
+                  {config.highlightType !== 'none' && (
+                    <div className="grid grid-cols-2 gap-3 animate-fadeIn">
+                      <div className="space-y-1">
+                        <span className="block text-[8px] font-mono text-neutral-500 uppercase font-bold text-neutral-400">Active Text Color</span>
+                        <input
+                          type="color"
+                          value={config.activeWordColor}
+                          onChange={(e) => setConfig(prev => ({ ...prev, activeWordColor: e.target.value }))}
+                          className="w-full h-8 bg-neutral-900 border border-neutral-800 rounded px-2 cursor-pointer"
+                        />
+                      </div>
+
+                      {(config.highlightType === 'word-bg' || config.highlightType === 'podcast-pill') && (
+                        <div className="space-y-1">
+                          <span className="block text-[8px] font-mono text-neutral-500 uppercase font-bold text-neutral-400">Backdrop Highlight Color</span>
+                          <input
+                            type="color"
+                            value={config.activeWordBgColor}
+                            onChange={(e) => setConfig(prev => ({ ...prev, activeWordBgColor: e.target.value }))}
+                            className="w-full h-8 bg-neutral-900 border border-neutral-800 rounded px-2 cursor-pointer"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1428,31 +2334,223 @@ export default function App() {
                   />
                   
                   {/* PLAYBACK CAPTION OVERLAY INTERACTIVE */}
-                  {activeCaptionText && (
+                  {currentActiveCaption && (
                     <div 
                       className="absolute text-center pointer-events-none px-4 select-none w-full animate-fadeIn z-10"
                       style={{ 
                         position: 'absolute',
-                        bottom: '10%',
+                        top: `${config.positionY}%`,
                         left: '50%',
-                        transform: 'translateX(-50%)',
+                        transform: 'translate(-50%, -50%)',
                         fontFamily: "'Inter', sans-serif" 
                       }}
                     >
-                      <span 
-                        className="inline-block px-3.5 py-1.5 rounded-lg text-center leading-normal"
-                        style={{
-                          fontSize: isVertical ? `${Math.max(12, Math.round(config.fontSize * 0.7))}px` : `${config.fontSize}px`,
-                          color: config.fontColor,
-                          backgroundColor: config.backgroundOpacity > 0 ? `${config.backgroundColor}${Math.round(config.backgroundOpacity * 255).toString(16).padStart(2, '0')}` : 'transparent',
-                          textShadow: config.strokeWidth > 0 
-                            ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}, -1px -1px ${config.strokeWidth}px ${config.strokeColor}` 
-                            : '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)',
-                          fontWeight: '600'
-                        }}
-                      >
-                        {activeCaptionText}
-                      </span>
+                      <div className="flex flex-col items-center justify-center text-center select-none w-full gap-y-1 md:gap-y-2">
+                        {(() => {
+                          const wordsCount = activeCaptionSplits.words.length;
+                          const showTwoLines = (config.highlightType === 'word-scale' || config.highlightType === 'hyper-reels' || config.highlightType === 'cursive-sandwich') && wordsCount > 3;
+
+                          if (showTwoLines) {
+                            const mid = Math.ceil(wordsCount / 2);
+                            const line1Words = activeCaptionSplits.words.slice(0, mid);
+                            const line2Words = activeCaptionSplits.words.slice(mid);
+
+                            const renderLine = (lineWords: string[], startIndex: number) => (
+                              <div className="flex flex-wrap justify-center items-center gap-x-2.5 sm:gap-x-3.5 py-1 w-full text-center">
+                                {lineWords.map((word, lineIdx) => {
+                                  const originalIdx = startIndex + lineIdx;
+                                  const isActive = originalIdx === activeCaptionSplits.activeIndex;
+                                  const baseSize = isVertical ? Math.max(14, Math.round(config.fontSize * 0.75)) : config.fontSize;
+
+                                  let wordStyle: React.CSSProperties = {
+                                    fontSize: `${baseSize}px`,
+                                    fontWeight: '950',
+                                    transition: 'all 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25)',
+                                    display: 'inline-block',
+                                  };
+
+                                  if (config.highlightType === 'cursive-sandwich' && !isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      fontFamily: "'Caveat', cursive",
+                                      fontSize: `${Math.round(baseSize * 1.15)}px`,
+                                      fontWeight: '700',
+                                      color: config.fontColor || '#ffffff',
+                                      opacity: 0.85,
+                                      textShadow: config.strokeWidth > 0 
+                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1.5px 2.5px rgba(0,0,0,0.9)` 
+                                        : '0 1px 3px rgba(0,0,0,0.9)',
+                                    };
+                                  } else if (config.highlightType === 'hyper-reels' && !isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      fontFamily: "'Montserrat', sans-serif",
+                                      fontWeight: '900',
+                                      color: config.fontColor || '#ffffff',
+                                      opacity: 0.55,
+                                      textShadow: config.strokeWidth > 0 
+                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1px 2px rgba(0,0,0,0.9)` 
+                                        : '0 1px 3px rgba(0,0,0,0.9)',
+                                    };
+                                  } else if (isActive) {
+                                    if (config.highlightType === 'cursive-sandwich') {
+                                      wordStyle = {
+                                        ...wordStyle,
+                                        fontFamily: "'Montserrat', sans-serif",
+                                        fontSize: `${Math.round(baseSize * 1.45)}px`,
+                                        color: config.activeWordColor || '#FFFF00',
+                                        transform: 'scale(1.4) rotate(-3.5deg)',
+                                        textShadow: `0 0 ${config.strokeWidth + 4}px ${config.strokeColor || '#000000'}, 2px 3px 6px rgba(0,0,0,0.98)`,
+                                        zIndex: 40,
+                                        position: 'relative'
+                                      };
+                                    } else if (config.highlightType === 'hyper-reels') {
+                                      wordStyle = {
+                                        ...wordStyle,
+                                        fontFamily: "'Montserrat', sans-serif",
+                                        fontSize: `${Math.round(baseSize * 1.45)}px`,
+                                        color: config.activeWordColor || '#00FF00',
+                                        transform: 'scale(1.4) rotate(-2deg)',
+                                        textShadow: `0 0 16px ${config.activeWordColor || '#00FF00'}, 0 0 ${config.strokeWidth + 3}px ${config.strokeColor || '#000000'}, 2px 2px 5px rgba(0,0,0,0.95)`,
+                                        zIndex: 40,
+                                        position: 'relative'
+                                      };
+                                    } else {
+                                      // default word-scale
+                                      wordStyle = {
+                                        ...wordStyle,
+                                        fontFamily: "'Montserrat', sans-serif",
+                                        color: config.activeWordColor || '#f43f5e',
+                                        transform: 'scale(1.35) rotate(-2deg)',
+                                        textShadow: config.strokeWidth > 0 
+                                          ? `0 0 ${config.strokeWidth + 2}px ${config.strokeColor}, 1px 1.5px 3px rgba(0,0,0,0.95)` 
+                                          : '0 2px 6px rgba(0,0,0,0.95)',
+                                        zIndex: 40,
+                                        position: 'relative'
+                                      };
+                                    }
+                                  } else {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      fontFamily: "'Montserrat', sans-serif",
+                                      color: config.fontColor || '#ffffff',
+                                      opacity: 0.65,
+                                      textShadow: config.strokeWidth > 0 
+                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}, -1px -1px ${config.strokeWidth}px ${config.strokeColor}` 
+                                        : '0 1px 3px rgba(0,0,0,0.9)',
+                                    };
+                                  }
+
+                                  return (
+                                    <span 
+                                      key={originalIdx}
+                                      className="inline-block px-0.5"
+                                      style={wordStyle}
+                                    >
+                                      {word}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            );
+
+                            return (
+                              <>
+                                {renderLine(line1Words, 0)}
+                                {renderLine(line2Words, mid)}
+                              </>
+                            );
+                          } else {
+                            // Standard single row rendering
+                            return (
+                              <div className="flex flex-wrap justify-center items-center gap-x-2 gap-y-1 w-full text-center">
+                                {activeCaptionSplits.words.map((word, idx) => {
+                                  const isActive = idx === activeCaptionSplits.activeIndex;
+                                  const baseSize = isVertical ? Math.max(12, Math.round(config.fontSize * 0.7)) : config.fontSize;
+
+                                  // Custom styles for each word
+                                  let wordStyle: React.CSSProperties = {
+                                    fontSize: `${baseSize}px`,
+                                    fontWeight: '800',
+                                    transition: 'all 0.1s ease',
+                                  };
+
+                                  if (config.highlightType === 'word-bg' && isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      color: config.activeWordColor,
+                                      backgroundColor: config.activeWordBgColor,
+                                      padding: '2px 8px',
+                                      borderRadius: '6px',
+                                      transform: 'scale(1.08)',
+                                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                    };
+                                  } else if (config.highlightType === 'podcast-pill' && isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      color: config.activeWordColor,
+                                      backgroundColor: config.activeWordBgColor,
+                                      padding: '4px 12px',
+                                      borderRadius: '999px',
+                                      transform: 'scale(1.1)',
+                                      boxShadow: '0 4px 15px rgba(0,0,0,0.4)',
+                                    };
+                                  } else if (config.highlightType === 'word-color' && isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      color: config.activeWordColor,
+                                      transform: 'scale(1.12)',
+                                      textShadow: config.strokeWidth > 0 
+                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}` 
+                                        : '0 1px 4px rgba(0,0,0,0.9)',
+                                    };
+                                  } else if (config.highlightType === 'karaoke-glow' && isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      color: config.activeWordColor,
+                                      transform: 'scale(1.18)',
+                                      textShadow: `0 0 10px ${config.activeWordColor}, 0 0 20px ${config.activeWordColor}`,
+                                    };
+                                  } else if (config.highlightType === 'word-scale' && isActive) {
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      color: config.activeWordColor,
+                                      fontWeight: '900',
+                                      transform: 'scale(1.35) rotate(-1.5deg)',
+                                      textShadow: config.strokeWidth > 0 
+                                        ? `0 0 ${config.strokeWidth + 1.5}px ${config.strokeColor}, 1px 1.5px 3px rgba(0,0,0,0.9)` 
+                                        : '0 2px 5px rgba(0,0,0,0.9)',
+                                      zIndex: 30,
+                                      position: 'relative',
+                                      transition: 'all 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                                    };
+                                  } else {
+                                    // Standard styling for non-highlighted word
+                                    wordStyle = {
+                                      ...wordStyle,
+                                      color: config.fontColor,
+                                      opacity: (config.highlightType === 'karaoke-glow') ? 0.55 : (config.highlightType === 'word-scale') ? 0.65 : 1,
+                                      textShadow: config.strokeWidth > 0 
+                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}, -1px -1px ${config.strokeWidth}px ${config.strokeColor}` 
+                                        : '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)',
+                                    };
+                                  }
+
+                                  return (
+                                    <span 
+                                      key={idx}
+                                      className="inline-block"
+                                      style={wordStyle}
+                                    >
+                                      {word}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
                     </div>
                   )}
                 </>

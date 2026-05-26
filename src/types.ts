@@ -22,6 +22,9 @@ export interface BurnConfig {
   strokeColor: string; // default stroke outline e.g., #000000
   strokeWidth: number; // e.g. 2
   positionY: number;      // percentage from top of screen e.g., 85 for bottom
+  highlightType: 'none' | 'word-bg' | 'word-color' | 'karaoke-glow' | 'podcast-pill' | 'word-scale' | 'hyper-reels' | 'cursive-sandwich';
+  activeWordColor: string;
+  activeWordBgColor: string;
 }
 
 export interface UserSettings {
