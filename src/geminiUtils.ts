@@ -430,7 +430,7 @@ Rules:
 }
 
 /**
- * Calls Groq Whisper API to transcribe a file and then uses Gemini to translate script if needed.
+ * Calls Groq Whisper API to transcribe a file in the user's selected language.
  */
 export async function generateTimestampedCaptionsGroq(
   videoFile: File,
@@ -444,6 +444,33 @@ export async function generateTimestampedCaptionsGroq(
   formData.append('model', 'whisper-large-v3');
   formData.append('response_format', 'verbose_json');
   formData.append('timestamp_granularities[]', 'word');
+
+  // Map user-selected language dynamically to Groq Whisper parameter guidelines
+  let whisperLanguage = '';
+  let whisperPrompt = '';
+
+  if (selectedLanguage.includes('Gurmukhi')) {
+    whisperLanguage = 'pa';
+    whisperPrompt = 'ਮੈਂ ਪੰਜਾਬੀ ਵਿੱਚ ਬੋਲ ਰਿਹਾ ਹਾਂ, ਕਿਰਪਾ ਕਰਕੇ ਪੰਜਾਬੀ ਗੁਰਮੁਖੀ ਅੱਖਰਾਂ ਵਿੱਚ ਲਿਖੋ।';
+  } else if (selectedLanguage.includes('Romanized') || selectedLanguage.includes('English Letters')) {
+    // When Romanized Punjabi is selected, do not hardcode 'pa' as that forces Gurmukhi script.
+    // Specifying an empty string prevents adding the 'pa' language field, while the prompt guides standard romanized characters.
+    whisperLanguage = '';
+    whisperPrompt = 'Sat Sri Akal, ki haal hai, tussi ki kar rahe ho, mai aunda haan, main thik haan.';
+  } else if (selectedLanguage.includes('Hindi') || selectedLanguage.includes('Devanagari')) {
+    whisperLanguage = 'hi';
+    whisperPrompt = 'हिन्दी में ट्रांसक्रिप्ट करें।';
+  } else if (selectedLanguage.includes('English') || selectedLanguage.includes('Translation')) {
+    whisperLanguage = 'en';
+    whisperPrompt = 'Transcribe or translate the audio stream accurately into English subtitles.';
+  }
+
+  if (whisperLanguage) {
+    formData.append('language', whisperLanguage);
+  }
+  if (whisperPrompt) {
+    formData.append('prompt', whisperPrompt);
+  }
 
   const groqResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
     method: 'POST',
@@ -500,7 +527,7 @@ export async function generateTimestampedCaptionsGroq(
     return [];
   }
 
-  // Map to CaptionSegment
+  // Map to CaptionSegment directly, leaving it unedited by Gemini for immediate user layout editing
   const mappedSegments: CaptionSegment[] = rawBlocks.map((seg: any, idx: number) => ({
     id: `seg-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
     startTime: typeof seg.start === 'number' ? seg.start : Number(seg.startTime || 0),
@@ -508,67 +535,248 @@ export async function generateTimestampedCaptionsGroq(
     text: String(seg.text || '')
   }));
 
-  // Batch Spell-Check Pipeline (Groq -> Gemini Single API Call)
-  const finalGeminiKey = geminiApiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-  if (finalGeminiKey && finalGeminiKey.trim()) {
-    const rawTexts = mappedSegments.map(s => s.text);
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
-    
-    const requestBody = {
-      contents: [
-        {
-          parts: [
-            {
-              text: `You are an expert Punjabi language proofreader and script modifier. You will receive an array of transcribed text strings. Fix spelling mistakes, missing matras, and phonetic errors. 
-STRICT RULES:
-1. Maintain the exact original words used by the speaker (e.g., if they say 'agar', keep it as 'agar', do not translate it to 'jekar'). Do not paraphrase.
-2. Keep the array indices, structure, and length identical to the input.
-3. Return ONLY a valid JSON array containing the corrected strings, with no markdown wrappers or extra commentary.
+  return mappedSegments;
+}
 
-Input text strings:
-${JSON.stringify(rawTexts)}`
-            }
-          ]
+/**
+ * Manually triggered spell-checker/refiner that uses Gemini 2.0 Flash
+ * to correct spelling mistakes IN THE SAME language without changing meaning or translation,
+ * with optional direct audio context for phoneme alignment and extreme precision.
+ */
+export async function correctCaptionsSpellingGemini(
+  texts: string[],
+  languageMode: string,
+  apiKey: string,
+  videoFile?: File | null,
+  onStatusUpdate?: (status: string) => void
+): Promise<string[]> {
+  const finalGeminiKey = apiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  if (!finalGeminiKey) {
+    throw new Error('Gemini API key is required for spell-checking. Please check your settings.');
+  }
+
+  let fileParts: any[] = [];
+
+  if (videoFile) {
+    if (onStatusUpdate) onStatusUpdate('Uploading media file to Google servers for audio-assisted verification...');
+    const uploadRes = await uploadToGoogleFileApi(videoFile, finalGeminiKey, (progress) => {
+      if (onStatusUpdate) onStatusUpdate(`Uploading audio track to Google File API: ${progress}%`);
+    });
+
+    if (onStatusUpdate) onStatusUpdate('Processing uploaded stream on Google hardware...');
+    await pollGoogleFileState(uploadRes.fileName, finalGeminiKey, (status) => {
+      if (onStatusUpdate) onStatusUpdate(status);
+    });
+
+    fileParts.push({
+      fileData: {
+        fileUri: uploadRes.fileUri,
+        mimeType: videoFile.type || 'video/mp4'
+      }
+    });
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
+
+  // Build targeted context instructions based on current languageMode selection
+  let langContext = languageMode;
+  if (languageMode.includes('Gurmukhi')) {
+    langContext = 'Punjabi Written in Gurmukhi Script (ਪੰਜਾਬੀ ਗੁਰਮੁਖੀ)';
+  } else if (languageMode.includes('Romanized') || languageMode.includes('English Letters')) {
+    langContext = 'Romanized Punjabi (Hinglish/transliterated Punjabi styling using Latin/English alphabet characters)';
+  } else if (languageMode.includes('Hindi') || languageMode.includes('Devanagari')) {
+    langContext = 'Hindi (Devanagari script)';
+  } else if (languageMode.includes('English')) {
+    langContext = 'English';
+  }
+
+  const prompt = videoFile
+    ? `You are an expert audio-visual editor and specialized bilingual proofreader focused on: ${langContext}.
+We are providing you with two inputs:
+1. The raw audio/video soundtrack of a speaker speaking.
+2. A chronologically ordered JSON string array of transcription segments representing what was transcribed (which may contain phonetic slips, spelling mistakes, typos, or grammatical errors).
+
+YOUR TASK:
+Using the uploaded soundtrack as direct audio/sound context, carefully perform audio-assisted spell-checking of the text segments. Correct any typos, spelling slips, missing matras, grammar errors, or misheard words IN THE EXACT SAME script/language style.
+
+CRITICAL DIRECTIVES:
+1. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
+2. Perfect the spelling and grammar for the target language context.
+3. Preserve slang, exact vocabulary choice, and timeline integrity. Do NOT paraphrase or translate.
+4. Keep the output array structure, count, and indices EXACTLY identical. The output JSON array must have exactly ${texts.length} elements.
+5. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+
+Input transcription segments to refine:
+${JSON.stringify(texts)}`
+    : `You are an expert editor and specialized bilingual proofreader focused on: ${langContext}.
+
+You will receive a chronologically ordered JSON string array of transcription segments representing captioned text (which may contain spelling errors, writing slips, or typos).
+
+YOUR TASK:
+Carefully perform high-precision spell-checking and text refinement. Keep the output text in the identical script, language, and meaning.
+
+CRITICAL DIRECTIVES:
+1. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
+2. Perfect the spelling and grammar for the target language context.
+3. Preserve slang, exact vocabulary choice, and timeline integrity. Do NOT paraphrase or translate.
+4. Keep the output array structure, count, and indices EXACTLY identical. The output JSON array must have exactly ${texts.length} elements.
+5. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+
+Input transcription segments to refine:
+${JSON.stringify(texts)}`;
+
+  if (onStatusUpdate) onStatusUpdate(videoFile ? 'Invoking Gemini audio-assisted cognitive spellchecker...' : 'Invoking Gemini text-based cognitive spellchecker...');
+
+  const requestBody = {
+    contents: [
+      {
+        parts: [
+          ...fileParts,
+          {
+            text: prompt
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'ARRAY',
+        items: {
+          type: 'STRING'
         }
-      ],
+      }
+    }
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini spellcheck service failed: ${response.status} ${errorText}`);
+  }
+
+  const result = await response.json();
+  const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) {
+    throw new Error('Received an empty response payload from the Gemini correction system.');
+  }
+
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+  }
+
+  const parsed = JSON.parse(cleaned);
+  if (!Array.isArray(parsed)) {
+    throw new Error('Spellcheck result parse error: output did not produce a corresponding JSON array.');
+  }
+
+  return parsed.map(item => String(item).trim());
+}
+
+/**
+ * Text-only conversion utility that translates or transliterates 
+ * generated captions to match the user's desired script/language mode 
+ * without modifying any timestamps or indices.
+ */
+export async function mapCaptionsToSelectedScript(
+  captions: CaptionSegment[],
+  languageMode: string,
+  apiKey: string
+): Promise<CaptionSegment[]> {
+  if (!captions || captions.length === 0) return captions;
+
+  const finalGeminiKey = apiKey || (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
+  if (!finalGeminiKey) {
+    console.warn('Skipping script mapping pass because Gemini API key is missing.');
+    return captions;
+  }
+
+  const texts = captions.map(c => c.text);
+
+  let targetPrompt = '';
+  if (languageMode.includes('Gurmukhi')) {
+    targetPrompt = 'Convert/Translate all input segments strictly into Pure Punjabi using the Gurmukhi script (e.g., ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ). Do NOT output in Roman letters, and do NOT translate into English. If it is already in Gurmukhi, keep it as is, but refine typos.';
+  } else if (languageMode.includes('Romanized') || languageMode.includes('English Letters')) {
+    targetPrompt = 'Convert/Transliterate all input segments strictly into Romanized Punjabi (Latin/English letters, e.g., "Sat Sri Akal", "ki haal chal hai", "tusan ki kar rahe ho"). Do NOT use Gurmukhi or Devanagari characters, and do NOT translate the meaning to English. Keep the spoken Punjabi words written in English letters verbatim.';
+  } else if (languageMode.includes('Hindi') || languageMode.includes('Devanagari')) {
+    targetPrompt = 'Translate or transcribe all input segments strictly into Pure Hindi using Devanagari script (e.g., नमस्ते, आप कैसे हैं). Do not use Gurmukhi or Roman script. Keep the original meaning and timeline aligned.';
+  } else if (languageMode.includes('English') || languageMode.includes('Translation')) {
+    targetPrompt = 'Translate all input segments strictly into natural, fluent Pure English. Ensure timing/duration slots maintain their exact spoken translations.';
+  } else {
+    return captions;
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
+
+  const prompt = `You are an expert bilingual dialect proofreader and script mapper. 
+We have raw caption segments transcribed from video audio. Your task is to process this JSON list of text segments and ensure they conform to the selected script style.
+
+TARGET SCRIPT SPECIFICATION:
+${targetPrompt}
+
+CRITICAL INSTRUCTIONS:
+1. Maintain the EXACT same array length of ${texts.length} elements.
+2. Maintain the exact order and correspondence. Do NOT merge, skip, or split any items.
+3. Keep the script conversion extremely natural and exact.
+4. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+
+Input segments:
+${JSON.stringify(texts)}`;
+
+  try {
+    const requestBody = {
+      contents: [{
+        parts: [{ text: prompt }]
+      }],
       generationConfig: {
-        responseMimeType: 'application/json'
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'ARRAY',
+          items: { type: 'STRING' }
+        }
       }
     };
 
-    try {
-      const response = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
 
-      if (response.ok) {
-        const result = await response.json();
-        const rawResponseText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (rawResponseText) {
-          let cleanedText = rawResponseText.trim();
-          if (cleanedText.startsWith('```')) {
-            cleanedText = cleanedText.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-          }
-          const correctedTexts = JSON.parse(cleanedText);
-          if (Array.isArray(correctedTexts)) {
-            for (let i = 0; i < mappedSegments.length; i++) {
-              if (correctedTexts[i] !== undefined) {
-                mappedSegments[i].text = String(correctedTexts[i]).trim();
-              }
-            }
-          }
-        }
-      } else {
-        console.warn('Gemini spell-check API failed, returning original Groq transcripts.', response.status);
-      }
-    } catch (err) {
-      console.error('Failed to run batch spell-checker/refiner with Gemini, falling back to original texts:', err);
+    if (!response.ok) {
+      console.error('Script mapping API request failed:', response.status);
+      return captions;
     }
+
+    const result = await response.json();
+    const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!rawText) return captions;
+
+    let cleaned = rawText.trim();
+    if (cleaned.startsWith('```')) {
+      cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    }
+
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed) && parsed.length === captions.length) {
+      return captions.map((c, idx) => ({
+        ...c,
+        text: String(parsed[idx]).trim()
+      }));
+    } else {
+      console.warn('Script mapper parsed array length mistmatch. Expected:', captions.length, 'Got:', parsed?.length);
+    }
+  } catch (error) {
+    console.error('Failed to map captions script via Gemini:', error);
   }
 
-  return mappedSegments;
+  return captions;
 }
 
 /**

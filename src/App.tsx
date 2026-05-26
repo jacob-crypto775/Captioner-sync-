@@ -6,7 +6,9 @@ import {
   generateTimestampedCaptions,
   generateTimestampedCaptionsInline,
   generateTimestampedCaptionsGroq,
-  parseTimestampToSeconds
+  parseTimestampToSeconds,
+  correctCaptionsSpellingGemini,
+  mapCaptionsToSelectedScript
 } from './geminiUtils';
 import { 
   Sparkles, 
@@ -174,6 +176,13 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [transcribeStatus, setTranscribeStatus] = useState('');
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
+
+  // Gemini manual spell check states
+  const [spellChecking, setSpellChecking] = useState<boolean>(false);
+  const [spellCheckError, setSpellCheckError] = useState<string | null>(null);
+  const [spellCheckSuccess, setSpellCheckSuccess] = useState<boolean>(false);
+  const [spellCheckStatus, setSpellCheckStatus] = useState<string>('');
+  const [spellCheckAudioGuided, setSpellCheckAudioGuided] = useState<boolean>(true);
 
   // Subtitle Custom Style configuration
   const [config, setConfig] = useState<BurnConfig>({
@@ -378,9 +387,14 @@ export default function App() {
         setTranscribeStatus('Preserving verbatim Groq timestamps & executing script mapper...');
         
         if (parsedCaptions && parsedCaptions.length > 0) {
-          setCaptions(parsedCaptions);
+          const mappedCaptions = await mapCaptionsToSelectedScript(
+            parsedCaptions,
+            captionLanguageMode,
+            geminiApiKey.trim()
+          );
+          setCaptions(mappedCaptions);
           setUploadProgress(100);
-          setTranscribeStatus('Successfully transcribed captions via Groq & Gemini!');
+          setTranscribeStatus('Successfully transcribed captions via Groq Whisper!');
           // Deliberate sleep for visual confirmation
           await new Promise(r => setTimeout(r, 800));
           setCurrentStep(2); // Auto-progress to edit phase
@@ -410,7 +424,12 @@ export default function App() {
         if (parsedCaptions && parsedCaptions.length > 0) {
           const calibrated = autoCalibrateCaptions(parsedCaptions);
           const calibratedAndFixed = fixTimestamps(calibrated);
-          setCaptions(calibratedAndFixed);
+          const mappedCaptions = await mapCaptionsToSelectedScript(
+            calibratedAndFixed,
+            captionLanguageMode,
+            geminiApiKey.trim()
+          );
+          setCaptions(mappedCaptions);
           setTranscribeStatus('Successfully transcribed captions!');
           // Deliberate sleep for visual confirmation
           await new Promise(r => setTimeout(r, 800));
@@ -439,6 +458,42 @@ export default function App() {
       }
       return seg;
     }));
+  };
+
+  // Perform Spell Checking with Gemini manually
+  const handleSpellCheckWithGemini = async () => {
+    if (captions.length === 0) return;
+    setSpellChecking(true);
+    setSpellCheckError(null);
+    setSpellCheckSuccess(false);
+    setSpellCheckStatus('Preparing transcription segments for spellcheck...');
+
+    try {
+      const texts = captions.map(seg => seg.text);
+      const cleanedTexts = await correctCaptionsSpellingGemini(
+        texts,
+        captionLanguageMode,
+        geminiApiKey,
+        spellCheckAudioGuided ? videoFile : null,
+        (status) => setSpellCheckStatus(status)
+      );
+
+      setCaptions(prev => prev.map((seg, idx) => {
+        if (cleanedTexts[idx] !== undefined) {
+          return { ...seg, text: cleanedTexts[idx] };
+        }
+        return seg;
+      }));
+
+      setSpellCheckSuccess(true);
+      setTimeout(() => setSpellCheckSuccess(false), 4500);
+    } catch (err: any) {
+      console.error(err);
+      setSpellCheckError(err.message || 'Gemini spell-check execution failed.');
+    } finally {
+      setSpellChecking(false);
+      setSpellCheckStatus('');
+    }
   };
 
   // Add individual segments
@@ -1024,6 +1079,75 @@ export default function App() {
               >
                 <Plus className="w-3.5 h-3.5" /> Add Block
               </button>
+            </div>
+
+            {/* GEMINI SPELL-CHECK CONTROL BOX */}
+            <div className="bg-neutral-950 border border-neutral-850 p-4 rounded-2xl space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-neutral-850">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-neutral-250 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" /> Correct Spelling with Gemini
+                  </h4>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed">
+                    Fix spelling slips, phonetic typos, and grammar errors in <span className="text-amber-400 font-semibold">{captionLanguageMode}</span> directly. Timestamps and structures remain completely unchanged.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSpellCheckWithGemini}
+                  disabled={spellChecking || captions.length === 0}
+                  className="bg-amber-500 text-neutral-950 font-black text-xs uppercase px-4 py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all hover:bg-amber-400 disabled:opacity-55 disabled:cursor-not-allowed shrink-0 cursor-pointer shadow-lg shadow-amber-500/10"
+                >
+                  {spellChecking ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-neutral-950 fill-neutral-950" />
+                      <span>Correct Spelling</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* AUDIO GUIDED TOGGLE ACCENT CONTROL */}
+              <div className="flex items-start sm:items-center gap-2.5 py-0.5">
+                <input
+                  type="checkbox"
+                  id="audioGuidedSpellcheck"
+                  checked={spellCheckAudioGuided}
+                  onChange={(e) => setSpellCheckAudioGuided(e.target.checked)}
+                  disabled={spellChecking}
+                  className="mt-0.5 sm:mt-0 rounded border-neutral-800 bg-neutral-900 text-amber-500 accent-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer disabled:opacity-50"
+                />
+                <label htmlFor="audioGuidedSpellcheck" className="text-[11px] text-neutral-300 cursor-pointer select-none leading-relaxed flex flex-col">
+                  <span>
+                    🎙️ <strong className="text-amber-400 font-bold uppercase tracking-wider text-[10px]">Active Voice Alignment (Listen to Sound):</strong> Let Gemini listen to the original video soundtrack to correct spelling mistakes based on speaking phonemes rather than text guesses only.
+                  </span>
+                </label>
+              </div>
+
+              {/* Status and Notifications */}
+              {spellChecking && (
+                <div className="text-[11px] text-amber-300 bg-amber-500/5 px-3 py-2 rounded-lg border border-amber-500/10 flex items-center gap-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>{spellCheckStatus || 'Analyzing transcription and proofreading via Gemini-2.0-flash...'}</span>
+                </div>
+              )}
+
+              {spellCheckSuccess && (
+                <div className="text-[11px] text-emerald-400 bg-emerald-500/5 px-3 py-2 rounded-lg border border-emerald-500/15">
+                  ✓ Spell-check refinement completed successfully!
+                </div>
+              )}
+
+              {spellCheckError && (
+                <div className="text-[11px] text-red-400 bg-red-500/5 px-3 py-2 rounded-lg border border-red-500/15">
+                  ⚠ Spellcheck Error: {spellCheckError}
+                </div>
+              )}
             </div>
 
             {/* EDITABLE SEGMENTS LIST */}
