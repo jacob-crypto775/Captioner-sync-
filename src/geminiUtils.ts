@@ -548,6 +548,22 @@ export async function generateTimestampedCaptionsGroq(
 }
 
 /**
+ * Helper to convert Blob or File to Base64 in browser standard environment
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read blob data'));
+    reader.onload = () => {
+      const resStr = reader.result as string;
+      const commaIdx = resStr.indexOf(',');
+      resolve(commaIdx !== -1 ? resStr.substring(commaIdx + 1) : resStr);
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Manually triggered spell-checker/refiner that uses Gemini 2.0 Flash
  * to correct spelling mistakes IN THE SAME language without changing meaning or translation,
  * with optional direct audio context for phoneme alignment and extreme precision.
@@ -556,42 +572,12 @@ export async function correctCaptionsSpellingGemini(
   texts: string[],
   languageMode: string,
   apiKey: string,
-  videoFile?: File | null,
+  audioBlob?: Blob | null,
   onStatusUpdate?: (status: string) => void
 ): Promise<string[]> {
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
   if (!finalGeminiKey) {
     throw new Error('Gemini API key is required for spell-checking. Please check your settings.');
-  }
-
-  let fileParts: any[] = [];
-
-  if (videoFile) {
-    try {
-      if (onStatusUpdate) onStatusUpdate('Uploading media file to Google servers for audio-assisted verification...');
-      const uploadRes = await uploadToGoogleFileApi(videoFile, finalGeminiKey, (progress) => {
-        if (onStatusUpdate) onStatusUpdate(`Uploading audio track to Google File API: ${progress}%`);
-      });
-
-      if (onStatusUpdate) onStatusUpdate('Processing uploaded stream on Google hardware...');
-      await pollGoogleFileState(uploadRes.fileName, finalGeminiKey, (status) => {
-        if (onStatusUpdate) onStatusUpdate(status);
-      });
-
-      fileParts.push({
-        fileData: {
-          fileUri: uploadRes.fileUri,
-          mimeType: videoFile.type || 'video/mp4'
-        }
-      });
-    } catch (uploadError) {
-      console.warn("Audio-assisted upload failed or not supported in this API key level. Falling back to text-only cognitive refinement.", uploadError);
-      if (onStatusUpdate) {
-        onStatusUpdate("⚠️ Audio upload not supported (free key restriction). Falling back to precise text cognitive spellcheck...");
-      }
-      // Disable video file guiding for this run so it falls back to text-only prompt
-      videoFile = null;
-    }
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
@@ -608,30 +594,12 @@ export async function correctCaptionsSpellingGemini(
     langContext = 'English';
   }
 
-  const prompt = videoFile
-    ? `You are an expert audio-visual editor and specialized bilingual proofreader focused on: ${langContext}.
-We are providing you with two inputs:
-1. The raw audio/video soundtrack of a speaker speaking.
-2. A chronologically ordered JSON string array of transcription segments representing what was transcribed (which may contain phonetic slips, spelling mistakes, typos, or grammatical errors).
+  const prompt = `You are an expert editor and specialized bilingual proofreader focused on: ${langContext}.
+
+Listen to the provided audio track and cross-reference it with the provided text captions array (which may contain phonetic errors, wrong interpretations, or spellings). Correct any spelling typos or wrong word interpretations. Strictly output the result in the EXACT same language script style (Roman letters if input is Roman Punjabi/Hinglish; Gurmukhi characters if input is Gurmukhi).
 
 YOUR TASK:
-Using the uploaded soundtrack as direct audio/sound context, carefully perform audio-assisted spell-checking of the text segments. Correct any typos, spelling slips, missing matras, grammar errors, or misheard words IN THE EXACT SAME script/language style.
-
-CRITICAL DIRECTIVES:
-1. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
-2. Perfect the spelling and grammar for the target language context.
-3. Preserve slang, exact vocabulary choice, and timeline integrity. Do NOT paraphrase or translate.
-4. Keep the output array structure, count, and indices EXACTLY identical. The output JSON array must have exactly ${texts.length} elements.
-5. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
-
-Input transcription segments to refine:
-${JSON.stringify(texts)}`
-    : `You are an expert editor and specialized bilingual proofreader focused on: ${langContext}.
-
-You will receive a chronologically ordered JSON string array of transcription segments representing captioned text (which may contain spelling errors, writing slips, or typos).
-
-YOUR TASK:
-Carefully perform high-precision spell-checking and text refinement. Keep the output text in the identical script, language, and meaning.
+Carefully perform high-precision spell-checking and text refinement using the provided audio reference if present. Keep the output text in the identical script, language, and meaning.
 
 CRITICAL DIRECTIVES:
 1. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
@@ -643,7 +611,26 @@ CRITICAL DIRECTIVES:
 Input transcription segments to refine:
 ${JSON.stringify(texts)}`;
 
-  if (onStatusUpdate) onStatusUpdate(videoFile ? 'Invoking Gemini audio-assisted cognitive spellchecker...' : 'Invoking Gemini text-based cognitive spellchecker...');
+  const fileParts: any[] = [];
+  if (audioBlob) {
+    if (onStatusUpdate) onStatusUpdate('Encoding audio track for voice-assisted proofreading...');
+    try {
+      const base64Audio = await blobToBase64(audioBlob);
+      fileParts.push({
+        inlineData: {
+          data: base64Audio,
+          mimeType: audioBlob.type || 'audio/mp3'
+        }
+      });
+    } catch (e: any) {
+      console.warn('Failed to convert audio blob to Base64:', e);
+      if (onStatusUpdate) onStatusUpdate('⚠️ Audio track encoding failed. Proceeding with text-only refinement...');
+    }
+  }
+
+  if (onStatusUpdate) {
+    onStatusUpdate(audioBlob ? 'Invoking Gemini multi-modal audio+text spellchecker...' : 'Invoking Gemini text-based cognitive spellchecker...');
+  }
 
   const requestBody = {
     contents: [
@@ -709,6 +696,18 @@ export async function mapCaptionsToSelectedScript(
   onStatusUpdate?: (status: string) => void
 ): Promise<CaptionSegment[]> {
   if (!captions || captions.length === 0) return captions;
+
+  const BATCH_SIZE = 25;
+  if (captions.length > 30) {
+    const batches: CaptionSegment[][] = [];
+    for (let i = 0; i < captions.length; i += BATCH_SIZE) {
+      batches.push(captions.slice(i, i + BATCH_SIZE));
+    }
+    const results = await Promise.all(
+      batches.map(batch => mapCaptionsToSelectedScript(batch, languageMode, apiKey, onStatusUpdate))
+    );
+    return results.flat();
+  }
 
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
   if (!finalGeminiKey) {
@@ -802,10 +801,10 @@ ${JSON.stringify(texts)}`;
     }
 
     const parsed = JSON.parse(cleaned);
-    if (Array.isArray(parsed) && parsed.length === captions.length) {
+    if (Array.isArray(parsed) && parsed.length > 0) {
       return captions.map((c, idx) => ({
         ...c,
-        text: String(parsed[idx]).trim()
+        text: idx < parsed.length ? String(parsed[idx]).trim() : c.text
       }));
     } else {
       console.warn('Script mapper parsed array length mistmatch. Expected:', captions.length, 'Got:', parsed?.length);

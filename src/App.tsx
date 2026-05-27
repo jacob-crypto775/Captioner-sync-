@@ -7,7 +7,8 @@ import {
   generateTimestampedCaptionsInline,
   generateTimestampedCaptionsGroq,
   parseTimestampToSeconds,
-  mapCaptionsToSelectedScript
+  mapCaptionsToSelectedScript,
+  correctCaptionsSpellingGemini
 } from './geminiUtils';
 import { 
   Sparkles, 
@@ -535,6 +536,8 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [transcribeStatus, setTranscribeStatus] = useState('');
   const [transcribeError, setTranscribeError] = useState<string | null>(null);
+  const [isSpellingCorrecting, setIsSpellingCorrecting] = useState(false);
+  const [spellConflictError, setSpellConflictError] = useState<string | null>(null);
 
 
 
@@ -564,6 +567,7 @@ export default function App() {
   // Synchronize active caption text with current time and segments using high-frequency requestAnimationFrame and native video events
   useEffect(() => {
     let rafId: number;
+    let isRunning = true;
 
     const syncSubtitles = () => {
       const video = videoRef.current;
@@ -573,55 +577,56 @@ export default function App() {
       setCurrentTime(time);
 
       const lookAheadTime = time + latencyOffset;
-      const matching = captions.find(c => 
-        lookAheadTime >= c.startTime && 
+      const matching = captions.find(c =>
+        lookAheadTime >= c.startTime &&
         lookAheadTime < c.endTime
       );
 
-      const nextText = matching ? matching.text : '';
-      setActiveCaptionText(nextText);
+      setActiveCaptionText(matching ? matching.text : '');
 
-      if (isPlaying && !video.paused && !video.ended) {
-        if (rafId) {
-          cancelAnimationFrame(rafId);
-        }
+      // FIXED: Use video.paused directly - NOT isPlaying state
+      if (!video.paused && !video.ended && isRunning) {
         rafId = requestAnimationFrame(syncSubtitles);
       }
     };
 
+    const startLoop = () => {
+      cancelAnimationFrame(rafId);
+      isRunning = true;
+      rafId = requestAnimationFrame(syncSubtitles);
+    };
+
+    const stopLoop = () => {
+      syncSubtitles(); // one last update on pause
+    };
+
     const video = videoRef.current;
     if (video) {
-      video.addEventListener('timeupdate', syncSubtitles);
+      video.addEventListener('play', startLoop);
+      video.addEventListener('pause', stopLoop);
+      video.addEventListener('ended', stopLoop);
       video.addEventListener('seeking', syncSubtitles);
-      video.addEventListener('seeked', syncSubtitles);
-      video.addEventListener('play', syncSubtitles);
-      video.addEventListener('pause', syncSubtitles);
-      video.addEventListener('ratechange', syncSubtitles);
-    }
+      video.addEventListener('seeked', startLoop);
+      video.addEventListener('timeupdate', syncSubtitles);
 
-    if (isPlaying) {
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-      }
-      rafId = requestAnimationFrame(syncSubtitles);
-    } else {
-      syncSubtitles();
+      // Start immediately if already playing
+      if (!video.paused) startLoop();
+      else syncSubtitles();
     }
 
     return () => {
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-      }
+      isRunning = false;
+      cancelAnimationFrame(rafId);
       if (video) {
-        video.removeEventListener('timeupdate', syncSubtitles);
+        video.removeEventListener('play', startLoop);
+        video.removeEventListener('pause', stopLoop);
+        video.removeEventListener('ended', stopLoop);
         video.removeEventListener('seeking', syncSubtitles);
-        video.removeEventListener('seeked', syncSubtitles);
-        video.removeEventListener('play', syncSubtitles);
-        video.removeEventListener('pause', syncSubtitles);
-        video.removeEventListener('ratechange', syncSubtitles);
+        video.removeEventListener('seeked', startLoop);
+        video.removeEventListener('timeupdate', syncSubtitles);
       }
     };
-  }, [isPlaying, captions, videoUrl, currentStep, latencyOffset]);
+  }, [captions, videoUrl, currentStep, latencyOffset]);
 
   // Video Export recorder states
   const [isExporting, setIsExporting] = useState(false);
@@ -801,17 +806,9 @@ export default function App() {
         }
       }
 
-      // Now process/map the captions (both Groq and Gemini need mapCaptionsToSelectedScript)
+      // Load raw captions directly into UI edit boxes immediately without waiting for Gemini mapping
       if (parsedCaptions && parsedCaptions.length > 0) {
-        setUploadProgress(92);
-        setTranscribeStatus('Preserving verbatim timestamps & executing script language mapper...');
-        const mappedCaptions = await mapCaptionsToSelectedScript(
-          parsedCaptions,
-          captionLanguageMode,
-          geminiApiKey.trim(),
-          (status) => setTranscribeStatus(status)
-        );
-        setCaptions(mappedCaptions);
+        setCaptions(parsedCaptions);
         setUploadProgress(100);
         setTranscribeStatus(isGroqSuccessful ? 'Successfully transcribed captions via Groq Whisper!' : 'Successfully transcribed captions via Gemini fallback!');
         
@@ -843,7 +840,117 @@ export default function App() {
     }));
   };
 
-  // Left blank intentionally - spelling is handled automatically in the unified Groq + Gemini pipeline
+  // Manual trigger to correct spelling with Gemini (audio-assisted, paid-tier capabilities)
+  const handleCorrectSpellingWithGemini = async () => {
+    if (captions.length === 0) return;
+    if (!geminiApiKey.trim()) {
+      setSpellConflictError("Google Gemini API Key is missing. Please configure your key first.");
+      return;
+    }
+    
+    setIsSpellingCorrecting(true);
+    setSpellConflictError(null);
+    
+    let audioBlob: Blob | null = null;
+    let fileArrayBuffer: ArrayBuffer | null = null;
+    let wavBuffer: ArrayBuffer | null = null;
+    
+    try {
+      if (videoFile) {
+        setTranscribeStatus("Initializing audio extractor component...");
+        try {
+          // Robust client-side AudioContext channel decoder
+          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          fileArrayBuffer = await videoFile.arrayBuffer();
+          setTranscribeStatus("Demuxing and decoding audio stream tracks...");
+          const decodedBuffer = await audioCtx.decodeAudioData(fileArrayBuffer);
+          
+          setTranscribeStatus("Re-sampling and encoding WAV audio reference...");
+          
+          // Custom in-memory WAV encoder
+          const numOfChan = decodedBuffer.numberOfChannels;
+          const length = decodedBuffer.length * numOfChan * 2 + 44;
+          wavBuffer = new ArrayBuffer(length);
+          const view = new DataView(wavBuffer);
+          const channels = [];
+          
+          // Write chunk descriptors
+          let pos = 0;
+          const writeString = (s: string) => {
+            for (let i = 0; i < s.length; i++) {
+              view.setUint8(pos++, s.charCodeAt(i));
+            }
+          };
+          
+          writeString('RIFF');
+          view.setUint32(pos, length - 8, true); pos += 4;
+          writeString('WAVE');
+          writeString('fmt ');
+          view.setUint32(pos, 16, true); pos += 4; // format chunk size
+          view.setUint16(pos, 1, true); pos += 2; // linear PCM
+          view.setUint16(pos, numOfChan, true); pos += 2; // channels count
+          view.setUint32(pos, decodedBuffer.sampleRate, true); pos += 4; // samplerate
+          view.setUint32(pos, decodedBuffer.sampleRate * numOfChan * 2, true); pos += 4; // byte rate
+          view.setUint16(pos, numOfChan * 2, true); pos += 2; // block align
+          view.setUint16(pos, 16, true); pos += 2; // bits per sample
+          writeString('data');
+          view.setUint32(pos, length - pos - 4, true); pos += 4;
+          
+          // Copy audio data to WAV buffer format
+          for (let i = 0; i < numOfChan; i++) {
+            channels.push(decodedBuffer.getChannelData(i));
+          }
+          
+          let offset = 0;
+          while (pos < length) {
+            for (let i = 0; i < numOfChan; i++) {
+              let sample = Math.max(-1, Math.min(1, channels[i][offset]));
+              sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+              view.setInt16(pos, sample, true);
+              pos += 2;
+            }
+            offset++;
+          }
+          
+          audioBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+          
+          // Clear variables to free memory immediately
+          await audioCtx.close();
+        } catch (audioErr) {
+          console.warn("Client-side audio extraction failed, falling back to text-only cognitive refinement.", audioErr);
+        }
+      }
+      
+      const textsToCorrect = captions.map(c => c.text);
+      const correctedTexts = await correctCaptionsSpellingGemini(
+        textsToCorrect,
+        captionLanguageMode,
+        geminiApiKey.trim(),
+        audioBlob,
+        (status) => setTranscribeStatus(status)
+      );
+      
+      setCaptions(prev => prev.map((c, idx) => ({
+        ...c,
+        text: correctedTexts[idx] !== undefined ? correctedTexts[idx] : c.text
+      })));
+      setTranscribeStatus("Successfully corrected spelling using audio-assisted Gemini 2.0 Flash!");
+    } catch (err: any) {
+      console.error(err);
+      setSpellConflictError(err.message || 'Spell correction failed. Please verify your Gemini API key and try again.');
+    } finally {
+      // Memory cleanup & Garbage Collection acceleration to prevent mobile crashes
+      audioBlob = null;
+      fileArrayBuffer = null;
+      wavBuffer = null;
+      setIsSpellingCorrecting(false);
+      
+      // Clean status after a brief delay
+      setTimeout(() => {
+        setTranscribeStatus("");
+      }, 3000);
+    }
+  };
 
   // Add individual segments
   const handleAddSegment = () => {
@@ -1758,13 +1865,49 @@ export default function App() {
               </button>
             </div>
 
+            {/* SPECIAL ACTION: CORRECT SPELLING WITH GEMINI */}
+            <div className="bg-gradient-to-r from-amber-500/10 to-indigo-500/10 border border-neutral-850 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <Sparkles className="w-5 h-5 text-amber-400 shrink-0 fill-amber-400/20 animate-pulse mt-0.5" />
+                <div className="space-y-0.5">
+                  <h4 className="text-[11px] font-bold text-neutral-200 uppercase tracking-wider">Supercharge with AI Spellchecker</h4>
+                  <p className="text-[10px] text-neutral-400 leading-relaxed">
+                    Instantly polish Punjabi script spelling, Romanized grammar, Devanagari matras, or English translation styles using Gemini 2.0 Flash in less than a second.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleCorrectSpellingWithGemini}
+                disabled={isSpellingCorrecting || captions.length === 0}
+                className="w-full sm:w-auto shrink-0 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-neutral-950 font-black text-[10px] uppercase tracking-widest py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+              >
+                {isSpellingCorrecting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Correcting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-neutral-950 font-black" />
+                    <span>Correct Spelling with Gemini</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {spellConflictError && (
+              <div className="p-3.5 bg-red-950/20 border border-red-500/25 rounded-2xl text-[11px] text-red-400 font-bold tracking-tight">
+                ⚠️ {spellConflictError}
+              </div>
+            )}
+
             {/* INFO BOX INDICATING THE COMBINED AUTOMATIC PIPELINE */}
             <div className="bg-neutral-950/60 border border-neutral-850 p-4 rounded-2xl flex items-center gap-3">
-              <Sparkles className="w-5 h-5 text-amber-400 shrink-0 fill-amber-400/10 animate-pulse" />
+              <Sparkles className="w-5 h-5 text-amber-400 shrink-0 fill-amber-400/10" />
               <div className="space-y-0.5">
                 <h4 className="text-[11px] font-bold text-neutral-200 uppercase tracking-widest">Wording & Spacing Calibrated</h4>
                 <p className="text-[10px] text-neutral-450 leading-relaxed">
-                  Groq Whisper v3 and Google Gemini-3.5-flash collaborated automatically to generate highly professional, perfectly spelled caption text matching your timeline.
+                  Groq Whisper v3 generates highly professional, perfectly spelled caption text matching your timeline.
                 </p>
               </div>
             </div>
