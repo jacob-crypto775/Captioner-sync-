@@ -179,7 +179,7 @@ export async function generateTimestampedCaptionsInline(
   base64Data: string,
   mimeType: string,
   apiKey: string,
-  modelName: string = 'gemini-2.0-flash',
+  modelName: string = 'gemini-2.5-flash',
   languageMode: string = 'Pure English (Translation Mode)'
 ): Promise<CaptionSegment[]> {
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
@@ -312,7 +312,7 @@ export async function generateTimestampedCaptions(
   fileUri: string,
   mimeType: string,
   apiKey: string,
-  modelName: string = 'gemini-2.0-flash',
+  modelName: string = 'gemini-2.5-flash',
   languageMode: string = 'Pure English (Translation Mode)'
 ): Promise<CaptionSegment[]> {
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
@@ -442,14 +442,14 @@ Rules:
  * Calls Groq Whisper API to transcribe a file in the user's selected language.
  */
 export async function generateTimestampedCaptionsGroq(
-  videoFile: File,
+  audioBlob: File | Blob,
   groqApiKey: string,
   geminiApiKey: string,
   selectedLanguage: string
 ): Promise<CaptionSegment[]> {
   const formData = new FormData();
-  // Ensure the third argument 'audio.mp4' is specified as filename for correct processing
-  formData.append('file', videoFile, 'audio.mp4');
+  // Ensure the third argument 'audio.wav' is specified as filename for correct processing
+  formData.append('file', audioBlob, 'audio.wav');
   formData.append('model', 'whisper-large-v3');
   formData.append('response_format', 'verbose_json');
   formData.append('timestamp_granularities[]', 'word');
@@ -458,27 +458,27 @@ export async function generateTimestampedCaptionsGroq(
   let whisperLanguage = '';
   let whisperPrompt = '';
 
-  if (selectedLanguage.includes('Gurmukhi')) {
-    whisperLanguage = 'pa';
-    whisperPrompt = 'ਮੈਂ ਪੰਜਾਬੀ ਵਿੱਚ ਬੋਲ ਰਿਹਾ ਹਾਂ, ਕਿਰਪਾ ਕਰਕੇ ਪੰਜਾਬੀ ਗੁਰਮੁਖੀ ਅੱਖਰਾਂ ਵਿੱਚ ਲਿਖੋ।';
-  } else if (selectedLanguage.includes('Romanized') || selectedLanguage.includes('English Letters')) {
-    // When Romanized Punjabi is selected, do not hardcode 'pa' as that forces Gurmukhi script.
-    // Specifying an empty string prevents adding the 'pa' language field, while the prompt guides standard romanized characters.
-    whisperLanguage = '';
-    whisperPrompt = 'Sat Sri Akal, ki haal hai, tussi ki kar rahe ho, mai aunda haan, main thik haan.';
-  } else if (selectedLanguage.includes('Hindi') || selectedLanguage.includes('Devanagari')) {
-    whisperLanguage = 'hi';
-    whisperPrompt = 'हिन्दी में ट्रांसक्रिप्ट करें।';
-  } else if (selectedLanguage.includes('English') || selectedLanguage.includes('Translation')) {
-    whisperLanguage = 'en';
-    whisperPrompt = 'Transcribe or translate the audio stream accurately into English subtitles.';
-  }
+  if (selectedLanguage.includes('Romanized') || selectedLanguage.includes('English Letters') || selectedLanguage.includes('Roman')) {
+    whisperLanguage = ''; // Never pass 'pa'
+    formData.append('prompt', 'Sat Sri Akal, ki haal hai, tussi ki kar rahe ho, mai aunda haan, main thik haan.');
+  } else {
+    if (selectedLanguage.includes('Gurmukhi')) {
+      whisperLanguage = 'pa';
+      whisperPrompt = 'ਮੈਂ ਪੰਜਾਬੀ ਵਿੱਚ ਬੋਲ ਰਿਹਾ ਹਾਂ, ਕਿਰਪਾ ਕਰਕੇ ਪੰਜਾਬੀ ਗੁਰਮੁਖੀ ਅੱਖਰਾਂ ਵਿੱਚ ਲਿਖੋ।';
+    } else if (selectedLanguage.includes('Hindi') || selectedLanguage.includes('Devanagari')) {
+      whisperLanguage = 'hi';
+      whisperPrompt = 'हिन्दी में ट्रांसक्रिप्ट करें।';
+    } else if (selectedLanguage.includes('English') || selectedLanguage.includes('Translation')) {
+      whisperLanguage = 'en';
+      whisperPrompt = 'Transcribe or translate the audio stream accurately into English subtitles.';
+    }
 
-  if (whisperLanguage) {
-    formData.append('language', whisperLanguage);
-  }
-  if (whisperPrompt) {
-    formData.append('prompt', whisperPrompt);
+    if (whisperLanguage) {
+      formData.append('language', whisperLanguage);
+    }
+    if (whisperPrompt) {
+      formData.append('prompt', whisperPrompt);
+    }
   }
 
   const groqResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
@@ -580,7 +580,7 @@ export async function correctCaptionsSpellingGemini(
     throw new Error('Gemini API key is required for spell-checking. Please check your settings.');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${finalGeminiKey}`;
 
   // Build targeted context instructions based on current languageMode selection
   let langContext = languageMode;
@@ -734,7 +734,7 @@ export async function mapCaptionsToSelectedScript(
     return captions;
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${finalGeminiKey}`;
 
   const prompt = `You are an AI subtitle wizard acting as the second stage of a high-performance hybrid pipeline (Groq Whisper v3 + Gemini).
 Groq Whisper has processed the video audio and generated high-quality timestamps, but its raw transcript wording is rough, phonetically literal, or has grammatical, spelling, formatting and language slips.
@@ -825,7 +825,7 @@ ${JSON.stringify(texts)}`;
  */
 export async function convertToGurmukhi(romanText: string, geminiApiKey: string): Promise<string> {
   const finalGeminiKey = geminiApiKey || getBundledGeminiApiKey();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${finalGeminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${finalGeminiKey}`;
   const requestBody = {
     contents: [
       {

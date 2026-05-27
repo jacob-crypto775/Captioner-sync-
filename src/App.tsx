@@ -492,6 +492,7 @@ export default function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isVertical, setIsVertical] = useState<boolean>(false);
+  const [extractedAudioBlob, setExtractedAudioBlob] = useState<Blob | null>(null);
   
   // Transcribed Captions State (Standard initial Punjabi mock translations)
   const [captions, setCaptions] = useState<CaptionSegment[]>([
@@ -719,6 +720,7 @@ export default function App() {
     const file = e.target.files?.[0];
     if (file) {
       setVideoFile(file);
+      setExtractedAudioBlob(null); // Clear cached extracted audio
       const url = URL.createObjectURL(file);
       setVideoUrl(url);
       setTranscribeError(null);
@@ -739,6 +741,71 @@ export default function App() {
     });
   };
 
+  // High-performance client-side Web Audio API audio-track extractor to prevent browser freezes
+  const extractLowBitrateWav = async (file: File, onStatusUpdate?: (status: string) => void): Promise<Blob> => {
+    if (onStatusUpdate) onStatusUpdate("Initializing audio extractor component...");
+    
+    // Auto-resample using browser hardware AudioContext standard setting
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+    const fileArrayBuffer = await file.arrayBuffer();
+    
+    if (onStatusUpdate) onStatusUpdate("Demuxing and decoding audio stream tracks to 16kHz...");
+    const decodedBuffer = await audioCtx.decodeAudioData(fileArrayBuffer);
+    
+    if (onStatusUpdate) onStatusUpdate("Encoding mono 16kHz compressed audio blob...");
+    
+    // We only need 1 channel (mono) at 16000Hz to match classic speech models perfectly
+    const channelData = decodedBuffer.getChannelData(0); // first channel
+    const sampleCount = channelData.length;
+    
+    // Create WAV container
+    const buffer = new ArrayBuffer(44 + sampleCount * 2);
+    const view = new DataView(buffer);
+    
+    /* RIFF identifier */
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    /* file length */
+    view.setUint32(4, 36 + sampleCount * 2, true);
+    /* RIFF type */
+    view.setUint32(8, 0x57415645, false); // "WAVE"
+    /* format chunk identifier */
+    view.setUint32(12, 0x666d7420, false); // "fmt "
+    /* format chunk length */
+    view.setUint32(16, 16, true);
+    /* sample format (raw pcm) */
+    view.setUint16(20, 1, true);
+    /* channel count */
+    view.setUint16(22, 1, true); // mono
+    /* sample rate */
+    view.setUint32(24, 16000, true);
+    /* byte rate (sample rate * block align) */
+    view.setUint32(28, 16000 * 2, true);
+    /* block align */
+    view.setUint16(32, 2, true);
+    /* bits per sample */
+    view.setUint16(34, 16, true);
+    /* data chunk identifier */
+    view.setUint32(36, 0x64617461, false); // "data"
+    /* chunk length */
+    view.setUint32(40, sampleCount * 2, true);
+    
+    // Convert float32 back to int16PCM
+    let offset = 44;
+    for (let i = 0; i < sampleCount; i++) {
+      let sample = Math.max(-1, Math.min(1, channelData[i]));
+      sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+      view.setInt16(offset, sample, true);
+      offset += 2;
+    }
+    
+    const audioBlob = new Blob([buffer], { type: 'audio/wav' });
+    
+    // Clean up Web Audio reference completely to recover memory immediately
+    await audioCtx.close();
+    
+    return audioBlob;
+  };
+
   // Initiate Groq Whisper or Gemini subtitle pipeline
   const handleGenerateCaptions = async () => {
     if (!videoFile) {
@@ -752,19 +819,27 @@ export default function App() {
 
     setTranscribing(true);
     setTranscribeError(null);
-    setUploadProgress(10);
+    setUploadProgress(5);
+
+    let activeAudioBlob = extractedAudioBlob;
 
     try {
+      if (!activeAudioBlob) {
+        setUploadProgress(15);
+        activeAudioBlob = await extractLowBitrateWav(videoFile, (status) => setTranscribeStatus(status));
+        setExtractedAudioBlob(activeAudioBlob);
+      }
+
       let parsedCaptions: CaptionSegment[] = [];
       let isGroqSuccessful = false;
 
       if (groqApiKey && groqApiKey.trim()) {
-        setTranscribeStatus('Submitting raw video soundtrack to Groq Whisper v3 hardware accelerator...');
+        setTranscribeStatus('Submitting extracted audio soundtrack to Groq Whisper v3 hardware accelerator...');
         setUploadProgress(40);
         
         try {
           parsedCaptions = await generateTimestampedCaptionsGroq(
-            videoFile,
+            activeAudioBlob,
             groqApiKey.trim(),
             geminiApiKey.trim(),
             captionLanguageMode
@@ -779,19 +854,20 @@ export default function App() {
 
       // If we didn't use Groq, or if Groq failed and we have no parsedCaptions
       if (!isGroqSuccessful) {
-        setTranscribeStatus('Reading localized media file into memory...');
-        setUploadProgress(25);
+        setTranscribeStatus('Converting audio track into inline Base64 data...');
+        setUploadProgress(60);
         
-        const base64Data = await fileToBase64(videoFile);
-        setUploadProgress(50);
-        setTranscribeStatus('Submitting raw sound stream directly to Gemini-2.0-flash cognitive models...');
+        // Convert the lightweight audio blob to base64 instead of heavy video!
+        const base64Data = await fileToBase64(new File([activeAudioBlob], 'audio.wav', { type: 'audio/wav' }));
+        setUploadProgress(70);
+        setTranscribeStatus('Submitting lightweight audio to Gemini-2.5-flash cognitive models...');
         
-        setUploadProgress(75);
+        setUploadProgress(80);
         parsedCaptions = await generateTimestampedCaptionsInline(
           base64Data,
-          videoFile.type || 'video/mp4',
+          'audio/wav', // Lightweight audio MIME type
           geminiApiKey.trim(),
-          'gemini-2.0-flash',
+          'gemini-2.5-flash',
           captionLanguageMode
         );
 
@@ -851,74 +927,12 @@ export default function App() {
     setIsSpellingCorrecting(true);
     setSpellConflictError(null);
     
-    let audioBlob: Blob | null = null;
-    let fileArrayBuffer: ArrayBuffer | null = null;
-    let wavBuffer: ArrayBuffer | null = null;
+    let activeAudioBlob = extractedAudioBlob;
     
     try {
-      if (videoFile) {
-        setTranscribeStatus("Initializing audio extractor component...");
-        try {
-          // Robust client-side AudioContext channel decoder
-          const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-          fileArrayBuffer = await videoFile.arrayBuffer();
-          setTranscribeStatus("Demuxing and decoding audio stream tracks...");
-          const decodedBuffer = await audioCtx.decodeAudioData(fileArrayBuffer);
-          
-          setTranscribeStatus("Re-sampling and encoding WAV audio reference...");
-          
-          // Custom in-memory WAV encoder
-          const numOfChan = decodedBuffer.numberOfChannels;
-          const length = decodedBuffer.length * numOfChan * 2 + 44;
-          wavBuffer = new ArrayBuffer(length);
-          const view = new DataView(wavBuffer);
-          const channels = [];
-          
-          // Write chunk descriptors
-          let pos = 0;
-          const writeString = (s: string) => {
-            for (let i = 0; i < s.length; i++) {
-              view.setUint8(pos++, s.charCodeAt(i));
-            }
-          };
-          
-          writeString('RIFF');
-          view.setUint32(pos, length - 8, true); pos += 4;
-          writeString('WAVE');
-          writeString('fmt ');
-          view.setUint32(pos, 16, true); pos += 4; // format chunk size
-          view.setUint16(pos, 1, true); pos += 2; // linear PCM
-          view.setUint16(pos, numOfChan, true); pos += 2; // channels count
-          view.setUint32(pos, decodedBuffer.sampleRate, true); pos += 4; // samplerate
-          view.setUint32(pos, decodedBuffer.sampleRate * numOfChan * 2, true); pos += 4; // byte rate
-          view.setUint16(pos, numOfChan * 2, true); pos += 2; // block align
-          view.setUint16(pos, 16, true); pos += 2; // bits per sample
-          writeString('data');
-          view.setUint32(pos, length - pos - 4, true); pos += 4;
-          
-          // Copy audio data to WAV buffer format
-          for (let i = 0; i < numOfChan; i++) {
-            channels.push(decodedBuffer.getChannelData(i));
-          }
-          
-          let offset = 0;
-          while (pos < length) {
-            for (let i = 0; i < numOfChan; i++) {
-              let sample = Math.max(-1, Math.min(1, channels[i][offset]));
-              sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-              view.setInt16(pos, sample, true);
-              pos += 2;
-            }
-            offset++;
-          }
-          
-          audioBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-          
-          // Clear variables to free memory immediately
-          await audioCtx.close();
-        } catch (audioErr) {
-          console.warn("Client-side audio extraction failed, falling back to text-only cognitive refinement.", audioErr);
-        }
+      if (!activeAudioBlob && videoFile) {
+        activeAudioBlob = await extractLowBitrateWav(videoFile, (status) => setTranscribeStatus(status));
+        setExtractedAudioBlob(activeAudioBlob);
       }
       
       const textsToCorrect = captions.map(c => c.text);
@@ -926,7 +940,7 @@ export default function App() {
         textsToCorrect,
         captionLanguageMode,
         geminiApiKey.trim(),
-        audioBlob,
+        activeAudioBlob,
         (status) => setTranscribeStatus(status)
       );
       
@@ -939,10 +953,6 @@ export default function App() {
       console.error(err);
       setSpellConflictError(err.message || 'Spell correction failed. Please verify your Gemini API key and try again.');
     } finally {
-      // Memory cleanup & Garbage Collection acceleration to prevent mobile crashes
-      audioBlob = null;
-      fileArrayBuffer = null;
-      wavBuffer = null;
       setIsSpellingCorrecting(false);
       
       // Clean status after a brief delay
@@ -1498,6 +1508,7 @@ export default function App() {
     setVideoFile(null);
     setVideoUrl(null);
     setIsVertical(false);
+    setExtractedAudioBlob(null); // Clear cached extracted audio
     setCaptions([
       { id: '1', startTime: 1.2, endTime: 4.5, text: 'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਜੀ, ਸਵਾਗਤ ਹੈ ਤੁਹਾਡਾ!' },
       { id: '2', startTime: 4.8, endTime: 8.0, text: 'Today we are burning dynamic Punjabi subtitles on the fly.' },
@@ -1739,6 +1750,7 @@ export default function App() {
                     onClick={() => {
                       setVideoFile(null);
                       setVideoUrl(null);
+                      setExtractedAudioBlob(null); // Clear cached extracted audio
                     }}
                     className="text-[10px] text-red-400 hover:text-red-350 font-bold bg-red-500/5 border border-red-500/15 py-1.5 px-3 rounded-xl transition-all flex-shrink-0"
                   >
