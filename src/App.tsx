@@ -8,7 +8,8 @@ import {
   generateTimestampedCaptionsGroq,
   parseTimestampToSeconds,
   mapCaptionsToSelectedScript,
-  correctCaptionsSpellingGemini
+  correctCaptionsSpellingGemini,
+  alignScriptWithTimestampsGemini
 } from './geminiUtils';
 import { 
   Sparkles, 
@@ -547,6 +548,11 @@ export default function App() {
   const [isSpellingCorrecting, setIsSpellingCorrecting] = useState(false);
   const [spellConflictError, setSpellConflictError] = useState<string | null>(null);
 
+  // Mode 2 custom script alignment state
+  const [customScriptText, setCustomScriptText] = useState('');
+  const [isAligningScript, setIsAligningScript] = useState(false);
+  const [showScriptAligner, setShowScriptAligner] = useState(false);
+
 
 
   // Subtitle Custom Style configuration
@@ -567,70 +573,79 @@ export default function App() {
   const [selectedPresetCategory, setSelectedPresetCategory] = useState<string>('💥 Active Word Zoom');
 
   // Video playback tracking helpers
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeCaptionText, setActiveCaptionText] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
-  const [latencyOffset, setLatencyOffset] = useState<number>(0.3);
+  const [latencyOffset, setLatencyOffset] = useState<number>(0.0);
 
-  // Synchronize active caption text with current time and segments using a single, high-frequency requestAnimationFrame loop
+  // Synchronize active caption text with current time and segments using a self-healing high-precision loop strategy
   useEffect(() => {
-    let rafId: number;
-    const video = videoRef.current;
+    const video = videoElement;
     if (!video) return;
 
-    const updateTime = () => {
+    let rafId: number;
+    let lastTime = -1;
+
+    const syncTime = () => {
       const time = video.currentTime;
-      setCurrentTime(time);
+      if (Math.abs(lastTime - time) > 0.005) {
+        lastTime = time;
+        setCurrentTime(time);
 
-      const lookAheadTime = time + latencyOffset;
-      const matching = captions.find(c =>
-        lookAheadTime >= c.startTime &&
-        lookAheadTime < c.endTime
-      );
-      setActiveCaptionText(matching ? matching.text : '');
-
-      if (!video.paused && !video.ended) {
-        rafId = requestAnimationFrame(updateTime);
+        const lookAheadTime = time + latencyOffset;
+        const matching = captions.find(c =>
+          lookAheadTime >= c.startTime &&
+          lookAheadTime < c.endTime
+        );
+        setActiveCaptionText(matching ? matching.text : '');
       }
     };
 
-    const handlePlay = () => {
+    const loop = () => {
+      syncTime();
+      if (!video.paused && !video.ended) {
+        rafId = requestAnimationFrame(loop);
+      }
+    };
+
+    const startLoop = () => {
       cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(updateTime);
+      rafId = requestAnimationFrame(loop);
     };
 
-    const handlePause = () => {
+    const stopLoop = () => {
       cancelAnimationFrame(rafId);
-      updateTime(); // Sync one last time on pause
+      syncTime();
     };
 
-    const handleSeeking = () => {
-      updateTime();
-    };
-
-    video.addEventListener('play', handlePlay);
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('ended', handlePause);
-    video.addEventListener('seeking', handleSeeking);
-    video.addEventListener('seeked', handleSeeking);
+    // Attach event listeners as foolproof self-healing mechanisms
+    video.addEventListener('play', startLoop);
+    video.addEventListener('playing', startLoop);
+    video.addEventListener('pause', stopLoop);
+    video.addEventListener('ended', stopLoop);
+    video.addEventListener('seeking', syncTime);
+    video.addEventListener('seeked', syncTime);
+    // Any timeupdate event triggers startLoop to automatically resurrect the active RAF loop if got killed by browser buffering
+    video.addEventListener('timeupdate', startLoop);
 
     // Initial sync
-    updateTime();
-
-    // If already playing some other way
-    if (!video.paused) {
-      handlePlay();
+    syncTime();
+    if (!video.paused && !video.ended) {
+      startLoop();
     }
 
     return () => {
       cancelAnimationFrame(rafId);
-      video.removeEventListener('play', handlePlay);
-      video.removeEventListener('pause', handlePause);
-      video.removeEventListener('ended', handlePause);
-      video.removeEventListener('seeking', handleSeeking);
-      video.removeEventListener('seeked', handleSeeking);
+      video.removeEventListener('play', startLoop);
+      video.removeEventListener('playing', startLoop);
+      video.removeEventListener('pause', stopLoop);
+      video.removeEventListener('ended', stopLoop);
+      video.removeEventListener('seeking', syncTime);
+      video.removeEventListener('seeked', syncTime);
+      video.removeEventListener('timeupdate', startLoop);
     };
-  }, [captions, videoUrl, currentStep, latencyOffset]);
+  }, [videoElement, captions, videoUrl, currentStep, latencyOffset]);
 
   // Video Export recorder states
   const [isExporting, setIsExporting] = useState(false);
@@ -677,7 +692,7 @@ export default function App() {
 
   // Watch video playback state
   useEffect(() => {
-    const video = videoRef.current;
+    const video = videoElement;
     if (!video) return;
 
     const handlePlay = () => setIsPlaying(true);
@@ -693,7 +708,7 @@ export default function App() {
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
     };
-  }, [videoUrl, currentStep]);
+  }, [videoElement]);
 
   // Automated trigger of dynamic burn engine upon entering Step 5
   useEffect(() => {
@@ -750,7 +765,24 @@ export default function App() {
     
     // Auto-resample using browser hardware AudioContext standard setting
     const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-    const fileArrayBuffer = await file.arrayBuffer();
+    
+    let fileArrayBuffer: ArrayBuffer;
+    try {
+      if (videoUrl) {
+        if (onStatusUpdate) onStatusUpdate("Accessing secure video buffer from browser cache...");
+        const response = await fetch(videoUrl);
+        if (!response.ok) {
+          throw new Error(`Fetch failed with status code ${response.status}`);
+        }
+        fileArrayBuffer = await response.arrayBuffer();
+      } else {
+        fileArrayBuffer = await file.arrayBuffer();
+      }
+    } catch (fetchErr: any) {
+      console.warn("Direct blob URL fetch failed, falling back to direct file read:", fetchErr);
+      if (onStatusUpdate) onStatusUpdate("Decoding direct OS file token pipeline stream...");
+      fileArrayBuffer = await file.arrayBuffer();
+    }
     
     if (onStatusUpdate) onStatusUpdate("Demuxing and decoding audio stream tracks to 16kHz...");
     const decodedBuffer = await audioCtx.decodeAudioData(fileArrayBuffer);
@@ -844,18 +876,27 @@ export default function App() {
         setUploadProgress(40);
         
         try {
+          // Map user-selected language dynamically to high-accuracy Whisper ISO codes ("pa", "hi", "en")
+          let selectedLanguage = 'pa';
+          if (captionLanguageMode.includes('Hindi') || captionLanguageMode.includes('Devanagari')) {
+            selectedLanguage = 'hi';
+          } else if (captionLanguageMode.includes('English') || captionLanguageMode.includes('Translation')) {
+            selectedLanguage = 'en';
+          } else {
+            selectedLanguage = 'pa';
+          }
+
           parsedCaptions = await generateTimestampedCaptionsGroq(
             activeAudioBlob,
             groqApiKey.trim(),
             geminiApiKey.trim(),
-            captionLanguageMode
+            selectedLanguage
           );
           isGroqSuccessful = true;
           
-          // Apply automatic 0.8s calibration offset and sequence alignment to standard Groq Whisper timestamps
+          // Apply sequence alignment directly to Groq Whisper timestamps (no offset calibration subtracted as word-level timestamps are already highly accurate)
           if (parsedCaptions && parsedCaptions.length > 0) {
-            const calibrated = autoCalibrateCaptions(parsedCaptions);
-            parsedCaptions = fixTimestamps(calibrated);
+            parsedCaptions = fixTimestamps(parsedCaptions);
           }
         } catch (groqErr: any) {
           console.warn('Groq Whisper failed, trying fallback to Gemini:', groqErr);
@@ -872,14 +913,14 @@ export default function App() {
         // Convert the lightweight audio blob to base64 instead of heavy video!
         const base64Data = await fileToBase64(new File([activeAudioBlob], 'audio.wav', { type: 'audio/wav' }));
         setUploadProgress(70);
-        setTranscribeStatus('Submitting lightweight audio to Gemini-2.5-flash cognitive models...');
+        setTranscribeStatus('Submitting lightweight audio to Gemini-2.5-flash-lite cognitive models...');
         
         setUploadProgress(80);
         parsedCaptions = await generateTimestampedCaptionsInline(
           base64Data,
           'audio/wav', // Lightweight audio MIME type
           geminiApiKey.trim(),
-          'gemini-2.5-flash',
+          'gemini-2.5-flash-lite',
           captionLanguageMode
         );
 
@@ -894,39 +935,26 @@ export default function App() {
         }
       }
 
-      // Load raw captions directly into UI and immediately trigger Gemini spell-checking chain
+      // Load raw captions directly into UI
       if (parsedCaptions && parsedCaptions.length > 0) {
-        setUploadProgress(90);
-        setTranscribeStatus('Perfecting captions vocabulary with Gemini-2.5-flash spellcheck...');
-        
-        // Backup of original Groq captions in case Gemini fails or truncates the array
-        const backupGroqCaptions = [...parsedCaptions];
+        setUploadProgress(95);
+        setTranscribeStatus('Finalizing raw transcript...');
 
-        try {
-          const perfectedCaptions = await correctCaptionsSpellingGemini(
-            parsedCaptions,
-            captionLanguageMode,
-            geminiApiKey.trim(),
-            activeAudioBlob,
-            (status) => setTranscribeStatus(`${status}`)
-          );
-          
-          if (perfectedCaptions && perfectedCaptions.length === parsedCaptions.length) {
-            parsedCaptions = perfectedCaptions;
-            setTranscribeStatus('Vocabulary perfected successfully!');
-          } else {
-            throw new Error('Gemini returned an invalid or truncated caption array.');
+        // Safely auto-extend the endTime of the very last caption segment to match the video duration
+        if (parsedCaptions.length > 0 && videoRef.current) {
+          const totalDuration = videoRef.current.duration;
+          if (!isNaN(totalDuration) && totalDuration > 0) {
+            const lastIdx = parsedCaptions.length - 1;
+            parsedCaptions[lastIdx] = {
+              ...parsedCaptions[lastIdx],
+              endTime: parseFloat(totalDuration.toFixed(2))
+            };
           }
-        } catch (spellErr: any) {
-          console.warn('Auto-spellcheck failed, falling back to original Groq transcript:', spellErr);
-          parsedCaptions = backupGroqCaptions; // Immediate fallback
-          setTranscribeStatus('⚠️ Audio-assisted spellcheck bypassed. Standard transcript loaded.');
-          await new Promise(r => setTimeout(r, 1500));
         }
 
         setCaptions(parsedCaptions);
         setUploadProgress(100);
-        setTranscribeStatus('Successfully transcribed and perfected captions!');
+        setTranscribeStatus('Successfully loaded raw transcripts! Choose a refinement option below to perfect it.');
         
         // Deliberate sleep for visual confirmation
         await new Promise(r => setTimeout(r, 800));
@@ -956,7 +984,7 @@ export default function App() {
     }));
   };
 
-  // Manual trigger to correct spelling with Gemini (audio-assisted, paid-tier capabilities)
+  // Manual trigger to correct spelling with Gemini (Option 1: Analyze Audio)
   const handleCorrectSpellingWithGemini = async () => {
     if (captions.length === 0) return;
     if (!geminiApiKey.trim()) {
@@ -972,21 +1000,22 @@ export default function App() {
     
     try {
       if (!activeAudioBlob && videoFile) {
+        setTranscribeStatus("Extracting audio reference for voice-assisted spellchecking...");
         activeAudioBlob = await extractLowBitrateWav(videoFile, (status) => setTranscribeStatus(status));
         setExtractedAudioBlob(activeAudioBlob);
       }
-      
+
       const perfectedCaptions = await correctCaptionsSpellingGemini(
         captions,
         captionLanguageMode,
         geminiApiKey.trim(),
-        activeAudioBlob,
+        activeAudioBlob, // Pass audio if available for Option 1
         (status) => setTranscribeStatus(status)
       );
       
       if (perfectedCaptions && perfectedCaptions.length === captions.length) {
         setCaptions(perfectedCaptions);
-        setTranscribeStatus("Successfully corrected spelling using audio-assisted Gemini 2.5 Flash!");
+        setTranscribeStatus(activeAudioBlob ? "Successfully perfected spelling with voice-assisted Gemini 2.5 Flash!" : "Successfully corrected spelling using ultra-fast Gemini 2.5 Flash!");
       } else {
         throw new Error('Gemini returned an invalid or truncated caption array.');
       }
@@ -1001,6 +1030,51 @@ export default function App() {
       setTimeout(() => {
         setTranscribeStatus("");
       }, 3000);
+    }
+  };
+
+  // Manual trigger block for Mode 2: Custom Script Alignment
+  const handleAlignScriptWithTimestamps = async () => {
+    if (captions.length === 0) return;
+    if (!customScriptText.trim()) {
+      setSpellConflictError("Please paste your correct script text into the box first.");
+      return;
+    }
+    if (!geminiApiKey.trim()) {
+      setSpellConflictError("Google Gemini API Key is missing. Please configure your key first.");
+      return;
+    }
+
+    setIsAligningScript(true);
+    setSpellConflictError(null);
+
+    const backupCaptions = [...captions];
+
+    try {
+      const alignedCaptions = await alignScriptWithTimestampsGemini(
+        captions,
+        customScriptText.trim(),
+        geminiApiKey.trim(),
+        (status) => setTranscribeStatus(status)
+      );
+
+      if (alignedCaptions && alignedCaptions.length === captions.length) {
+        setCaptions(alignedCaptions);
+        setTranscribeStatus("Successfully aligned your custom script onto original timestamps!");
+      } else {
+        throw new Error('Script alignment failed: returned a mismatched or truncated timeline.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setCaptions(backupCaptions); // Restore on error
+      setSpellConflictError(err.message || 'Script alignment failed. Verify your Gemini key and script text, then retry.');
+    } finally {
+      setIsAligningScript(false);
+
+      // Reset the status display after 4 seconds
+      setTimeout(() => {
+        setTranscribeStatus("");
+      }, 4000);
     }
   };
 
@@ -1587,6 +1661,137 @@ export default function App() {
     return { words, activeIndex };
   })();
 
+  // Unified style retriever for high-fidelity interactive live player rendering supporting all types of highlighting
+  const getLiveWordStyle = (isActive: boolean, baseSize: number): React.CSSProperties => {
+    let style: React.CSSProperties = {
+      fontSize: `${baseSize}px`,
+      fontWeight: '900',
+      transition: 'all 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25)',
+      display: 'inline-block',
+    };
+
+    if (isActive) {
+      if (config.highlightType === 'word-bg') {
+        style = {
+          ...style,
+          color: config.activeWordColor || '#000000',
+          backgroundColor: config.activeWordBgColor || '#facc15',
+          padding: '2px 8px',
+          borderRadius: '5px',
+          transform: 'scale(1.08)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          zIndex: 30,
+          position: 'relative'
+        };
+      } else if (config.highlightType === 'podcast-pill') {
+        style = {
+          ...style,
+          color: config.activeWordColor || '#000000',
+          backgroundColor: config.activeWordBgColor || '#facc15',
+          padding: '4px 12px',
+          borderRadius: '999px',
+          transform: 'scale(1.1)',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.4)',
+          zIndex: 30,
+          position: 'relative'
+        };
+      } else if (config.highlightType === 'word-color') {
+        style = {
+          ...style,
+          color: config.activeWordColor || '#facc15',
+          transform: 'scale(1.12)',
+          textShadow: config.strokeWidth > 0 
+            ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1px ${config.strokeWidth}px ${config.strokeColor || '#000000'}` 
+            : '0 1px 4px rgba(0,0,0,0.9)',
+        };
+      } else if (config.highlightType === 'karaoke-glow') {
+        style = {
+          ...style,
+          color: config.activeWordColor || '#22d3ee',
+          transform: 'scale(1.18)',
+          textShadow: `0 0 10px ${config.activeWordColor || '#22d3ee'}, 0 0 20px ${config.activeWordColor || '#22d3ee'}, 0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}`,
+        };
+      } else if (config.highlightType === 'word-scale') {
+        style = {
+          ...style,
+          color: config.activeWordColor || '#FFFF00',
+          fontWeight: '950',
+          transform: 'scale(1.35) rotate(-1.5deg)',
+          textShadow: config.strokeWidth > 0 
+            ? `0 0 ${config.strokeWidth + 1.5}px ${config.strokeColor || '#000000'}, 1px 1.5px 3px rgba(0,0,0,0.9)` 
+            : '0 2px 5px rgba(0,0,0,0.9)',
+          zIndex: 30,
+          position: 'relative',
+        };
+      } else if (config.highlightType === 'hyper-reels') {
+        style = {
+          ...style,
+          fontFamily: "'Montserrat', sans-serif",
+          fontSize: `${Math.round(baseSize * 1.45)}px`,
+          color: config.activeWordColor || '#00FF00',
+          transform: 'scale(1.4) rotate(-2deg)',
+          textShadow: `0 0 16px ${config.activeWordColor || '#00FF00'}, 0 0 ${config.strokeWidth + 3}px ${config.strokeColor || '#000000'}, 2px 2px 5px rgba(0,0,0,0.95)`,
+          zIndex: 40,
+          position: 'relative'
+        };
+      } else if (config.highlightType === 'cursive-sandwich') {
+        style = {
+          ...style,
+          fontFamily: "'Montserrat', sans-serif",
+          fontSize: `${Math.round(baseSize * 1.45)}px`,
+          color: config.activeWordColor || '#FFFF00',
+          transform: 'scale(1.4) rotate(-3.5deg)',
+          textShadow: `0 0 ${config.strokeWidth + 4}px ${config.strokeColor || '#000000'}, 2px 3px 6px rgba(0,0,0,0.98)`,
+          zIndex: 40,
+          position: 'relative'
+        };
+      } else {
+        style = {
+          ...style,
+          color: config.activeWordColor,
+          transform: 'scale(1.1)'
+        };
+      }
+    } else {
+      // Non-active word handling based on highlightType
+      if (config.highlightType === 'cursive-sandwich') {
+        style = {
+          ...style,
+          fontFamily: "'Caveat', cursive",
+          fontSize: `${Math.round(baseSize * 1.15)}px`,
+          fontWeight: '700',
+          color: config.fontColor || '#ffffff',
+          opacity: 0.85,
+          textShadow: config.strokeWidth > 0 
+            ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1.5px 2.5px rgba(0,0,0,0.9)` 
+            : '0 1px 3px rgba(0,0,0,0.9)',
+        };
+      } else if (config.highlightType === 'hyper-reels') {
+        style = {
+          ...style,
+          fontFamily: "'Montserrat', sans-serif",
+          fontWeight: '900',
+          color: config.fontColor || '#ffffff',
+          opacity: 0.55,
+          textShadow: config.strokeWidth > 0 
+            ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1px 2px rgba(0,0,0,0.9)` 
+            : '0 1px 3px rgba(0,0,0,0.9)',
+        };
+      } else {
+        style = {
+          ...style,
+          color: config.fontColor || '#ffffff',
+          opacity: (config.highlightType === 'karaoke-glow') ? 0.55 : (config.highlightType === 'word-scale') ? 0.65 : 1,
+          textShadow: config.strokeWidth > 0 
+            ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1px ${config.strokeWidth}px ${config.strokeColor || '#000000'}, -1px -1px ${config.strokeWidth}px ${config.strokeColor || '#000000'}` 
+            : '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)',
+        };
+      }
+    }
+
+    return style;
+  };
+
   return (
     <div id="app-root" className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-indigo-500/35 selection:text-indigo-200">
       
@@ -1921,34 +2126,101 @@ export default function App() {
               </button>
             </div>
 
-            {/* SPECIAL ACTION: CORRECT SPELLING WITH GEMINI */}
-            <div className="bg-gradient-to-r from-amber-500/10 to-indigo-500/10 border border-neutral-850 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-amber-400 shrink-0 fill-amber-400/20 animate-pulse mt-0.5" />
-                <div className="space-y-0.5">
-                  <h4 className="text-[11px] font-bold text-neutral-200 uppercase tracking-wider">Supercharge with AI Spellchecker</h4>
-                  <p className="text-[10px] text-neutral-400 leading-relaxed">
-                    Instantly polish Punjabi script spelling, Romanized grammar, Devanagari matras, or English translation styles using Gemini 2.0 Flash in less than a second.
-                  </p>
-                </div>
+            {/* DUAL MODE CONTROL CENTER FOR TRANSCRIPT PERFECTING */}
+            <div className="bg-neutral-950/80 border border-neutral-850 rounded-2xl p-4 space-y-4">
+              <div className="flex border-b border-neutral-850 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setShowScriptAligner(false)}
+                  className={`flex-1 text-center py-2 text-[10px] uppercase font-black tracking-wider transition-all cursor-pointer ${
+                    !showScriptAligner 
+                      ? 'text-amber-400 border-b-2 border-amber-500' 
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  🎧 Option A: Refine via Audio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowScriptAligner(true)}
+                  className={`flex-1 text-center py-2 text-[10px] uppercase font-black tracking-wider transition-all cursor-pointer ${
+                    showScriptAligner 
+                      ? 'text-indigo-400 border-b-2 border-indigo-505' 
+                      : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
+                >
+                  📝 Option B: Refine via Script
+                </button>
               </div>
-              <button
-                onClick={handleCorrectSpellingWithGemini}
-                disabled={isSpellingCorrecting || captions.length === 0}
-                className="w-full sm:w-auto shrink-0 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-neutral-950 font-black text-[10px] uppercase tracking-widest py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
-              >
-                {isSpellingCorrecting ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Correcting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5 text-neutral-950 font-black" />
-                    <span>Correct Spelling with Gemini</span>
-                  </>
-                )}
-              </button>
+
+              {!showScriptAligner ? (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="space-y-1 select-none flex-1">
+                    <h4 className="text-[11px] font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" /> Option A: Refine via Audio (Gemini Flash-Lite)
+                    </h4>
+                    <p className="text-[10px] text-neutral-400 leading-relaxed max-w-md">
+                      Whisper generates the timings. Gemini Flash-Lite alignment corrects Punjabi, Hindi, or English spellings cleanly while keeping timestamps 100% locked.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleCorrectSpellingWithGemini}
+                    disabled={isSpellingCorrecting || captions.length === 0}
+                    className="w-full sm:w-auto shrink-0 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-neutral-950 font-black text-[10px] uppercase tracking-widest py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+                  >
+                    {isSpellingCorrecting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Refining Audio...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-neutral-950 font-black" />
+                        <span>Refine via Audio (Gemini Flash-Lite)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3.5">
+                  <div className="space-y-1 select-none">
+                    <h4 className="text-[11px] font-bold text-neutral-200 uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="text-sm">📝</span> Option B: Refine via Script (Gemini Flash-Lite)
+                    </h4>
+                    <p className="text-[10px] text-neutral-450 leading-relaxed">
+                      Paste your actual correct text script transcript below. We will swap Whispers' bad spellings with corrected words from this script while keeping original timestamps mathematically locked.
+                    </p>
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={customScriptText}
+                    onChange={(e) => setCustomScriptText(e.target.value)}
+                    placeholder="Example: Sat sri akal ji, mera naam Jashan hai. Aaj di video vich main tuhanu..."
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2.5 text-xs text-neutral-200 placeholder-neutral-550 focus:border-indigo-500 outline-none transition-all font-mono leading-relaxed"
+                  />
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleAlignScriptWithTimestamps}
+                      disabled={isAligningScript || captions.length === 0 || !customScriptText.trim()}
+                      className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[10px] uppercase tracking-widest py-2.5 px-4.5 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    >
+                      {isAligningScript ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Aligning Script...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Refine via Script (Gemini Flash-Lite)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {spellConflictError && (
@@ -2516,7 +2788,18 @@ export default function App() {
               {videoUrl ? (
                 <>
                   <video
-                    ref={videoRef}
+                    ref={(el) => {
+                      videoRef.current = el;
+                      if (el) {
+                        if (videoElement !== el) {
+                          setVideoElement(el);
+                        }
+                      } else {
+                        if (!videoUrl && videoElement !== null) {
+                          setVideoElement(null);
+                        }
+                      }
+                    }}
                     src={videoUrl}
                     className="w-full h-full object-contain"
                     controls
@@ -2527,6 +2810,21 @@ export default function App() {
                       const w = e.currentTarget.videoWidth;
                       const h = e.currentTarget.videoHeight;
                       setIsVertical(h > w);
+
+                      // Ensure the last caption segment's endTime matches the video's total duration
+                      const dur = e.currentTarget.duration;
+                      if (!isNaN(dur) && dur > 0) {
+                        setCaptions((prev) => {
+                          if (prev.length === 0) return prev;
+                          const updated = [...prev];
+                          const lastIdx = updated.length - 1;
+                          updated[lastIdx] = {
+                            ...updated[lastIdx],
+                            endTime: parseFloat(dur.toFixed(2))
+                          };
+                          return updated;
+                        });
+                      }
                     }}
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
@@ -2555,95 +2853,17 @@ export default function App() {
                             const line2Words = activeCaptionSplits.words.slice(mid);
 
                             const renderLine = (lineWords: string[], startIndex: number) => (
-                              <div className="flex flex-wrap justify-center items-center gap-x-2.5 sm:gap-x-3.5 py-1 w-full text-center">
+                              <div className="flex flex-wrap justify-center items-center gap-x-2.5 sm:gap-x-3.5 py-1 w-full text-center animate-fadeIn">
                                 {lineWords.map((word, lineIdx) => {
                                   const originalIdx = startIndex + lineIdx;
                                   const isActive = originalIdx === activeCaptionSplits.activeIndex;
                                   const baseSize = isVertical ? Math.max(14, Math.round(config.fontSize * 0.75)) : config.fontSize;
-
-                                  let wordStyle: React.CSSProperties = {
-                                    fontSize: `${baseSize}px`,
-                                    fontWeight: '950',
-                                    transition: 'all 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25)',
-                                    display: 'inline-block',
-                                  };
-
-                                  if (config.highlightType === 'cursive-sandwich' && !isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      fontFamily: "'Caveat', cursive",
-                                      fontSize: `${Math.round(baseSize * 1.15)}px`,
-                                      fontWeight: '700',
-                                      color: config.fontColor || '#ffffff',
-                                      opacity: 0.85,
-                                      textShadow: config.strokeWidth > 0 
-                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1.5px 2.5px rgba(0,0,0,0.9)` 
-                                        : '0 1px 3px rgba(0,0,0,0.9)',
-                                    };
-                                  } else if (config.highlightType === 'hyper-reels' && !isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      fontFamily: "'Montserrat', sans-serif",
-                                      fontWeight: '900',
-                                      color: config.fontColor || '#ffffff',
-                                      opacity: 0.55,
-                                      textShadow: config.strokeWidth > 0 
-                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor || '#000000'}, 1px 1px 2px rgba(0,0,0,0.9)` 
-                                        : '0 1px 3px rgba(0,0,0,0.9)',
-                                    };
-                                  } else if (isActive) {
-                                    if (config.highlightType === 'cursive-sandwich') {
-                                      wordStyle = {
-                                        ...wordStyle,
-                                        fontFamily: "'Montserrat', sans-serif",
-                                        fontSize: `${Math.round(baseSize * 1.45)}px`,
-                                        color: config.activeWordColor || '#FFFF00',
-                                        transform: 'scale(1.4) rotate(-3.5deg)',
-                                        textShadow: `0 0 ${config.strokeWidth + 4}px ${config.strokeColor || '#000000'}, 2px 3px 6px rgba(0,0,0,0.98)`,
-                                        zIndex: 40,
-                                        position: 'relative'
-                                      };
-                                    } else if (config.highlightType === 'hyper-reels') {
-                                      wordStyle = {
-                                        ...wordStyle,
-                                        fontFamily: "'Montserrat', sans-serif",
-                                        fontSize: `${Math.round(baseSize * 1.45)}px`,
-                                        color: config.activeWordColor || '#00FF00',
-                                        transform: 'scale(1.4) rotate(-2deg)',
-                                        textShadow: `0 0 16px ${config.activeWordColor || '#00FF00'}, 0 0 ${config.strokeWidth + 3}px ${config.strokeColor || '#000000'}, 2px 2px 5px rgba(0,0,0,0.95)`,
-                                        zIndex: 40,
-                                        position: 'relative'
-                                      };
-                                    } else {
-                                      // default word-scale
-                                      wordStyle = {
-                                        ...wordStyle,
-                                        fontFamily: "'Montserrat', sans-serif",
-                                        color: config.activeWordColor || '#f43f5e',
-                                        transform: 'scale(1.35) rotate(-2deg)',
-                                        textShadow: config.strokeWidth > 0 
-                                          ? `0 0 ${config.strokeWidth + 2}px ${config.strokeColor}, 1px 1.5px 3px rgba(0,0,0,0.95)` 
-                                          : '0 2px 6px rgba(0,0,0,0.95)',
-                                        zIndex: 40,
-                                        position: 'relative'
-                                      };
-                                    }
-                                  } else {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      fontFamily: "'Montserrat', sans-serif",
-                                      color: config.fontColor || '#ffffff',
-                                      opacity: 0.65,
-                                      textShadow: config.strokeWidth > 0 
-                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}, -1px -1px ${config.strokeWidth}px ${config.strokeColor}` 
-                                        : '0 1px 3px rgba(0,0,0,0.9)',
-                                    };
-                                  }
+                                  const wordStyle = getLiveWordStyle(isActive, baseSize);
 
                                   return (
                                     <span 
                                       key={originalIdx}
-                                      className="inline-block px-0.5"
+                                      className="inline-block px-1"
                                       style={wordStyle}
                                     >
                                       {word}
@@ -2662,83 +2882,16 @@ export default function App() {
                           } else {
                             // Standard single row rendering
                             return (
-                              <div className="flex flex-wrap justify-center items-center gap-x-2 gap-y-1 w-full text-center">
+                              <div className="flex flex-wrap justify-center items-center gap-x-2 gap-y-1 w-full text-center animate-fadeIn">
                                 {activeCaptionSplits.words.map((word, idx) => {
                                   const isActive = idx === activeCaptionSplits.activeIndex;
                                   const baseSize = isVertical ? Math.max(12, Math.round(config.fontSize * 0.7)) : config.fontSize;
-
-                                  // Custom styles for each word
-                                  let wordStyle: React.CSSProperties = {
-                                    fontSize: `${baseSize}px`,
-                                    fontWeight: '800',
-                                    transition: 'all 0.1s ease',
-                                  };
-
-                                  if (config.highlightType === 'word-bg' && isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      color: config.activeWordColor,
-                                      backgroundColor: config.activeWordBgColor,
-                                      padding: '2px 8px',
-                                      borderRadius: '6px',
-                                      transform: 'scale(1.08)',
-                                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                                    };
-                                  } else if (config.highlightType === 'podcast-pill' && isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      color: config.activeWordColor,
-                                      backgroundColor: config.activeWordBgColor,
-                                      padding: '4px 12px',
-                                      borderRadius: '999px',
-                                      transform: 'scale(1.1)',
-                                      boxShadow: '0 4px 15px rgba(0,0,0,0.4)',
-                                    };
-                                  } else if (config.highlightType === 'word-color' && isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      color: config.activeWordColor,
-                                      transform: 'scale(1.12)',
-                                      textShadow: config.strokeWidth > 0 
-                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}` 
-                                        : '0 1px 4px rgba(0,0,0,0.9)',
-                                    };
-                                  } else if (config.highlightType === 'karaoke-glow' && isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      color: config.activeWordColor,
-                                      transform: 'scale(1.18)',
-                                      textShadow: `0 0 10px ${config.activeWordColor}, 0 0 20px ${config.activeWordColor}`,
-                                    };
-                                  } else if (config.highlightType === 'word-scale' && isActive) {
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      color: config.activeWordColor,
-                                      fontWeight: '900',
-                                      transform: 'scale(1.35) rotate(-1.5deg)',
-                                      textShadow: config.strokeWidth > 0 
-                                        ? `0 0 ${config.strokeWidth + 1.5}px ${config.strokeColor}, 1px 1.5px 3px rgba(0,0,0,0.9)` 
-                                        : '0 2px 5px rgba(0,0,0,0.9)',
-                                      zIndex: 30,
-                                      position: 'relative',
-                                      transition: 'all 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-                                    };
-                                  } else {
-                                    // Standard styling for non-highlighted word
-                                    wordStyle = {
-                                      ...wordStyle,
-                                      color: config.fontColor,
-                                      opacity: (config.highlightType === 'karaoke-glow') ? 0.55 : (config.highlightType === 'word-scale') ? 0.65 : 1,
-                                      textShadow: config.strokeWidth > 0 
-                                        ? `0 0 ${config.strokeWidth}px ${config.strokeColor}, 1px 1px ${config.strokeWidth}px ${config.strokeColor}, -1px -1px ${config.strokeWidth}px ${config.strokeColor}` 
-                                        : '0 1px 3px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)',
-                                    };
-                                  }
+                                  const wordStyle = getLiveWordStyle(isActive, baseSize);
 
                                   return (
                                     <span 
                                       key={idx}
-                                      className="inline-block"
+                                      className="inline-block px-1"
                                       style={wordStyle}
                                     >
                                       {word}

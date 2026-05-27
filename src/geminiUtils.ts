@@ -179,7 +179,7 @@ export async function generateTimestampedCaptionsInline(
   base64Data: string,
   mimeType: string,
   apiKey: string,
-  modelName: string = 'gemini-2.5-flash',
+  modelName: string = 'gemini-2.5-flash-lite',
   languageMode: string = 'Pure English (Translation Mode)'
 ): Promise<CaptionSegment[]> {
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
@@ -312,7 +312,7 @@ export async function generateTimestampedCaptions(
   fileUri: string,
   mimeType: string,
   apiKey: string,
-  modelName: string = 'gemini-2.5-flash',
+  modelName: string = 'gemini-2.5-flash-lite',
   languageMode: string = 'Pure English (Translation Mode)'
 ): Promise<CaptionSegment[]> {
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
@@ -450,35 +450,26 @@ export async function generateTimestampedCaptionsGroq(
   const formData = new FormData();
   // Ensure the third argument 'audio.wav' is specified as filename for correct processing
   formData.append('file', audioBlob, 'audio.wav');
-  formData.append('model', 'whisper-large-v3');
+  formData.append('model', 'whisper-large-v3-turbo');
   formData.append('response_format', 'verbose_json');
   formData.append('timestamp_granularities[]', 'word');
+  formData.append('timestamp_granularities[]', 'segment');
+  formData.append('temperature', '0.0');
 
-  // Map user-selected language dynamically to Groq Whisper parameter guidelines
-  let whisperLanguage = '';
+  // Map user-selected language dynamically to Groq Whisper parameters as requested
+  formData.append('language', selectedLanguage);
+
   let whisperPrompt = '';
+  if (selectedLanguage === 'pa') {
+    whisperPrompt = 'ਮੈਂ ਪੰਜਾਬੀ ਵਿੱਚ ਬੋਲ ਰਿਹਾ ਹਾਂ, ਕਿਰਪਾ ਕਰਕੇ ਪੰਜਾਬੀ ਵਿੱਚ ਲਿਖੋ।';
+  } else if (selectedLanguage === 'hi') {
+    whisperPrompt = 'हिन्दी में ट्रांसक्रिप्ट करें।';
+  } else if (selectedLanguage === 'en') {
+    whisperPrompt = 'Transcribe or translate the audio stream accurately into English subtitles.';
+  }
 
-  if (selectedLanguage.includes('Romanized') || selectedLanguage.includes('English Letters') || selectedLanguage.includes('Roman')) {
-    whisperLanguage = ''; // Never pass 'pa'
-    formData.append('prompt', 'Sat Sri Akal, ki haal hai, tussi ki kar rahe ho, mai aunda haan, main thik haan.');
-  } else {
-    if (selectedLanguage.includes('Gurmukhi')) {
-      whisperLanguage = 'pa';
-      whisperPrompt = 'ਮੈਂ ਪੰਜਾਬੀ ਵਿੱਚ ਬੋਲ ਰਿਹਾ ਹਾਂ, ਕਿਰਪਾ ਕਰਕੇ ਪੰਜਾਬੀ ਗੁਰਮੁਖੀ ਅੱਖਰਾਂ ਵਿੱਚ ਲਿਖੋ।';
-    } else if (selectedLanguage.includes('Hindi') || selectedLanguage.includes('Devanagari')) {
-      whisperLanguage = 'hi';
-      whisperPrompt = 'हिन्दी में ट्रांसक्रिप्ट करें।';
-    } else if (selectedLanguage.includes('English') || selectedLanguage.includes('Translation')) {
-      whisperLanguage = 'en';
-      whisperPrompt = 'Transcribe or translate the audio stream accurately into English subtitles.';
-    }
-
-    if (whisperLanguage) {
-      formData.append('language', whisperLanguage);
-    }
-    if (whisperPrompt) {
-      formData.append('prompt', whisperPrompt);
-    }
+  if (whisperPrompt) {
+    formData.append('prompt', whisperPrompt);
   }
 
   const groqResponse = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
@@ -583,7 +574,7 @@ export async function correctCaptionsSpellingGemini(
     throw new Error('Gemini API key is required for spell-checking. Please check your settings.');
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${finalGeminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${finalGeminiKey}`;
 
   // Build targeted context instructions based on current languageMode selection
   let langContext = languageMode;
@@ -600,26 +591,9 @@ export async function correctCaptionsSpellingGemini(
   // Format payload exactly as a flat array of strings to avoid confusing the model with numeric parameters
   const payloadToRefine = captions.map(c => c.text);
 
-  const prompt = `You are an expert editor and specialized bilingual proofreader focused on: ${langContext}.
-
-Listen to the provided audio track and cross-reference it with the provided JSON array of transcription texts. Correct any spelling typos or wrong word interpretations. Strictly output the result in the EXACT same language script style (Roman letters if input is Roman Punjabi/Hinglish; Gurmukhi characters if input is Gurmukhi).
-
-YOUR TASK:
-Carefully perform high-precision spell-checking and text refinement using the provided audio reference if present. Keep the output text in the identical script, language, and meaning.
-
-CRITICAL DIRECTIVES:
-1. STRICT ARRAY SIZE CONSERVATION (No Dropped Captions): You are ONLY allowed to fix spelling typos. You MUST NOT delete, skip, merge, or remove any caption segments. The total count of output JSON array items MUST EXACTLY match the input array count of ${captions.length} elements.
-2. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
-3. Perfect the spelling and grammar for the target language context.
-4. Preserve slang, exact vocabulary choice, and meaning integrity. Do NOT paraphrase, summarize, or translate.
-5. Return ONLY a JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
-
-Input transcription segments to refine:
-${JSON.stringify(payloadToRefine, null, 2)}`;
-
   const fileParts: any[] = [];
   if (audioBlob) {
-    if (onStatusUpdate) onStatusUpdate('Encoding audio track for voice-assisted proofreading...');
+    if (onStatusUpdate) onStatusUpdate('Encoding audio track for voice-assisted proofreading (Option 1: Analyze Audio)...');
     try {
       const base64Audio = await blobToBase64(audioBlob);
       fileParts.push({
@@ -634,8 +608,33 @@ ${JSON.stringify(payloadToRefine, null, 2)}`;
     }
   }
 
+  const prompt = audioBlob
+    ? `You are a high-precision subtitle refiner. Listen closely to the provided audio file and correct any spelling, hearing, or grammatical mistakes in the provided Punjabi/Hindi/English Groq captions text (Option 1: Analyze Audio).
+Do not summarize, do not change the sentence structure, and do not drop any words. Return the exact same number of lines in the corrected version. Keep the exact same translation script (Roman Punjabi stays Roman, Gurmukhi stays Gurmukhi). Save the pure corrected text back to the corresponding JSON indices.
+
+Language context: ${langContext}
+
+CRITICAL DIRECTIVES:
+1. STRICT ARRAY SIZE CONSERVATION (No Dropped Captions): You MUST return a JSON array containing EXACTLY ${captions.length} elements. Each index in the output array corresponds to the input array index. No merging or dropping of segments.
+2. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE.
+3. Return ONLY a JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+
+Input text lines to refine:
+${JSON.stringify(payloadToRefine, null, 2)}`
+    : `You are a lightning-fast spell-checker. Correct the spelling mistakes in this text. Do not summarize, do not change the sentence structure, and do not drop any words. Return the exact same number of words/sentences in the corrected version. Keep the exact same translation script (Roman Punjabi stays Roman, Gurmukhi stays Gurmukhi). Return ONLY the corrected lines as a clean JSON array.
+
+Language context: ${langContext}
+
+CRITICAL DIRECTIVES:
+1. STRICT ARRAY SIZE CONSERVATION (No Dropped Captions): You are ONLY allowed to fix spelling typos. You MUST NOT delete, skip, merge, or remove any lines. The total count of output JSON array items MUST EXACTLY match the input array count of ${captions.length} elements.
+2. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters, you MUST keep it in Romanized letters with correct spellings! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
+3. Return ONLY a JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+
+Input text lines to refine:
+${JSON.stringify(payloadToRefine, null, 2)}`;
+
   if (onStatusUpdate) {
-    onStatusUpdate(audioBlob ? 'Invoking Gemini multi-modal audio+text spellchecker...' : 'Invoking Gemini text-based cognitive spellchecker...');
+    onStatusUpdate(audioBlob ? 'Perfecting transcript using voice-assisted Gemini audio analyzer...' : 'Perfecting transcript via lightning-fast Gemini text spellchecker...');
   }
 
   const requestBody = {
@@ -689,19 +688,21 @@ ${JSON.stringify(payloadToRefine, null, 2)}`;
   }
 
   if (parsed.length !== captions.length) {
-    throw new Error(`Gemini parsed array length mismatch. Expected: ${captions.length}, Got: ${parsed.length}`);
+    console.warn(`Gemini parsed array length mismatch. Expected: ${captions.length}, Got: ${parsed.length}. Best-effort timestamp locking applied.`);
   }
 
-  // Enforce zero timing modifications by map-joining text with pristine original timelines
-  const correctedCaptions: CaptionSegment[] = captions.map((original, i) => {
-    const correctedText = parsed[i];
-    return {
-      ...original,
-      text: typeof correctedText === 'string' ? correctedText.trim() : original.text
-    };
-  });
+  // Create a deep copy of original captions to lock timestamps completely to pristine Groq timelines
+  const groqSegments: CaptionSegment[] = captions.map((original) => ({ ...original }));
+  const geminiCorrectedText = parsed;
 
-  return correctedCaptions;
+  // Absolute Timestamp Locking: Loop through and only align text strings index-by-index (array-matching safety check)
+  for (let i = 0; i < geminiCorrectedText.length; i++) {
+    if (groqSegments[i]) {
+      groqSegments[i].text = typeof geminiCorrectedText[i] === 'string' ? String(geminiCorrectedText[i]).trim() : String(geminiCorrectedText[i]);
+    }
+  }
+
+  return groqSegments;
 }
 
 /**
@@ -754,7 +755,7 @@ export async function mapCaptionsToSelectedScript(
     return captions;
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${finalGeminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${finalGeminiKey}`;
 
   const prompt = `You are an AI subtitle wizard acting as the second stage of a high-performance hybrid pipeline (Groq Whisper v3 + Gemini).
 Groq Whisper has processed the video audio and generated high-quality timestamps, but its raw transcript wording is rough, phonetically literal, or has grammatical, spelling, formatting and language slips.
@@ -822,12 +823,23 @@ ${JSON.stringify(texts)}`;
 
     const parsed = JSON.parse(cleaned);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return captions.map((c, idx) => ({
-        ...c,
-        text: idx < parsed.length ? String(parsed[idx]).trim() : c.text
-      }));
+      if (parsed.length !== captions.length) {
+        console.warn(`Script mapper parsed array length mismatch. Expected: ${captions.length}, Got: ${parsed.length}. Best-effort timestamp locking applied.`);
+      }
+
+      // Create a deep copy of original captions to lock pristine Groq timelines
+      const correctedCaptions: CaptionSegment[] = captions.map((original) => ({ ...original }));
+
+      // Absolute Timestamp Locking: Loop through and only align text strings index-by-index (array-matching safety check)
+      for (let i = 0; i < parsed.length; i++) {
+        if (correctedCaptions[i]) {
+          correctedCaptions[i].text = typeof parsed[i] === 'string' ? String(parsed[i]).trim() : String(parsed[i]);
+        }
+      }
+
+      return correctedCaptions;
     } else {
-      console.warn('Script mapper parsed array length mistmatch. Expected:', captions.length, 'Got:', parsed?.length);
+      console.warn('Script mapper parsed array is not a valid array.');
     }
   } catch (error: any) {
     console.error('Failed to map captions script via Gemini:', error);
@@ -841,11 +853,115 @@ ${JSON.stringify(texts)}`;
 }
 
 /**
+ * Mode 2: Aligns a perfect script text onto raw Groq timestamps index-by-index using Gemini's cognitive flow.
+ * Ensures timestamps remain 100% locked during replacement.
+ */
+export async function alignScriptWithTimestampsGemini(
+  captions: CaptionSegment[],
+  scriptText: string,
+  apiKey: string,
+  onStatusUpdate?: (status: string) => void
+): Promise<CaptionSegment[]> {
+  const finalGeminiKey = apiKey || getBundledGeminiApiKey();
+  if (!finalGeminiKey) {
+    throw new Error('Gemini API key is required to align scripts. Please configure your key first.');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${finalGeminiKey}`;
+
+  if (onStatusUpdate) {
+    onStatusUpdate('Aligning custom script text onto Groq caption timestamps...');
+  }
+
+  const rawBins = captions.map((c, i) => `#${i + 1}: "${c.text}"`).join('\n');
+
+  const prompt = `You are an expert subtitle script alignment assistant.
+You have two inputs:
+1. A sequencially ordered list of ${captions.length} raw subtitle segment bins (which has spelling mistakes, transcript errors, or missing words):
+${rawBins}
+
+2. The correct, pristine text script transcript:
+"${scriptText}"
+
+YOUR TASK:
+Align the words, phrases, or sentences from the correct pristine text script perfectly onto the ${captions.length} corresponding raw subtitle segment bins sequentially.
+Replace the inaccurate text inside each numbered segment bin with the actual matching, correct phrases/words from the pristine script.
+Ensure the flow is natural, keep the original sentence order, and make sure you allocate text to exactly ${captions.length} segments.
+
+CRITICAL DIRECTIVES:
+1. STRICT ARRAY SIZE CONSERVATION: You MUST return a JSON array containing EXACTLY ${captions.length} elements. Each index in the output array corresponds to the bin index. No merging or dropping.
+2. Return ONLY a JSON string array of corrected strings (e.g., ["segment1_text", "segment2_text", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+
+Provide the finalized text for each segment:`;
+
+  const requestBody = {
+    contents: [
+      {
+        parts: [
+          {
+            text: prompt
+          }
+        ]
+      }
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'ARRAY',
+        items: {
+          type: 'STRING'
+        }
+      }
+    }
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini alignment failed: ${response.status} ${errorText}`);
+  }
+
+  const result = await response.json();
+  const rawText = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) {
+    throw new Error('Received an empty response payload from the Gemini alignment system.');
+  }
+
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+  }
+
+  const parsed = JSON.parse(cleaned);
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('Alignment result did not produce a valid JSON array.');
+  }
+
+  // Create a deep copy of original captions to lock timestamps completely to pristine Groq timelines
+  const groqSegments: CaptionSegment[] = captions.map((original) => ({ ...original }));
+
+  // Absolute Timestamp Locking: Loop through and only align text strings index-by-index (array-matching safety check)
+  for (let i = 0; i < parsed.length; i++) {
+    if (groqSegments[i]) {
+      groqSegments[i].text = typeof parsed[i] === 'string' ? String(parsed[i]).trim() : String(parsed[i]);
+    }
+  }
+
+  return groqSegments;
+}
+
+/**
  * Script converter helper using Gemini 3.5 Flash
  */
 export async function convertToGurmukhi(romanText: string, geminiApiKey: string): Promise<string> {
   const finalGeminiKey = geminiApiKey || getBundledGeminiApiKey();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${finalGeminiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${finalGeminiKey}`;
   const requestBody = {
     contents: [
       {
