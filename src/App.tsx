@@ -882,11 +882,35 @@ export default function App() {
         }
       }
 
-      // Load raw captions directly into UI edit boxes immediately without waiting for Gemini mapping
+      // Load raw captions directly into UI and immediately trigger Gemini spell-checking chain
       if (parsedCaptions && parsedCaptions.length > 0) {
+        setUploadProgress(90);
+        setTranscribeStatus('Perfecting captions vocabulary with Gemini-2.5-flash spellcheck...');
+        
+        try {
+          const textsToCorrect = parsedCaptions.map(c => c.text);
+          const correctedTexts = await correctCaptionsSpellingGemini(
+            textsToCorrect,
+            captionLanguageMode,
+            geminiApiKey.trim(),
+            activeAudioBlob,
+            (status) => setTranscribeStatus(`${status}`)
+          );
+          
+          parsedCaptions = parsedCaptions.map((c, idx) => ({
+            ...c,
+            text: correctedTexts[idx] !== undefined ? correctedTexts[idx] : c.text
+          }));
+          setTranscribeStatus('Vocabulary perfected successfully!');
+        } catch (spellErr: any) {
+          console.warn('Auto-spellcheck failed, falling back to raw Whisper transcript:', spellErr);
+          setTranscribeStatus('⚠️ Audio-assisted spellcheck bypassed. Standard transcript loaded.');
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
         setCaptions(parsedCaptions);
         setUploadProgress(100);
-        setTranscribeStatus(isGroqSuccessful ? 'Successfully transcribed captions via Groq Whisper!' : 'Successfully transcribed captions via Gemini fallback!');
+        setTranscribeStatus('Successfully transcribed and perfected captions!');
         
         // Deliberate sleep for visual confirmation
         await new Promise(r => setTimeout(r, 800));
