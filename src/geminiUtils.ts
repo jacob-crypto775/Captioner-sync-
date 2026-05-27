@@ -564,17 +564,20 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Manually triggered spell-checker/refiner that uses Gemini 2.0 Flash
+ * Manually or automatically triggered spell-checker/refiner that uses Gemini 2.5 Flash
  * to correct spelling mistakes IN THE SAME language without changing meaning or translation,
  * with optional direct audio context for phoneme alignment and extreme precision.
+ * 
+ * Timeline Preservation Constraint: Ensures that every start and end timestamp is strictly 
+ * parsed and preserved or safely synchronized.
  */
 export async function correctCaptionsSpellingGemini(
-  texts: string[],
+  captions: CaptionSegment[],
   languageMode: string,
   apiKey: string,
   audioBlob?: Blob | null,
   onStatusUpdate?: (status: string) => void
-): Promise<string[]> {
+): Promise<CaptionSegment[]> {
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();
   if (!finalGeminiKey) {
     throw new Error('Gemini API key is required for spell-checking. Please check your settings.');
@@ -587,29 +590,32 @@ export async function correctCaptionsSpellingGemini(
   if (languageMode.includes('Gurmukhi')) {
     langContext = 'Punjabi Written in Gurmukhi Script (ਪੰਜਾਬੀ ਗੁਰਮੁਖੀ)';
   } else if (languageMode.includes('Romanized') || languageMode.includes('English Letters')) {
-    langContext = 'Romanized Punjabi (Hinglish/transliterated Punjabi styling using Latin/English alphabet characters)';
+    langContext = 'Romanized Punjabi (Hinglish / transliterated Punjabi styling using Latin/English alphabet characters)';
   } else if (languageMode.includes('Hindi') || languageMode.includes('Devanagari')) {
     langContext = 'Hindi (Devanagari script)';
   } else if (languageMode.includes('English')) {
     langContext = 'English';
   }
 
+  // Format payload exactly as a flat array of strings to avoid confusing the model with numeric parameters
+  const payloadToRefine = captions.map(c => c.text);
+
   const prompt = `You are an expert editor and specialized bilingual proofreader focused on: ${langContext}.
 
-Listen to the provided audio track and cross-reference it with the provided text captions array (which may contain phonetic errors, wrong interpretations, or spellings). Correct any spelling typos or wrong word interpretations. Strictly output the result in the EXACT same language script style (Roman letters if input is Roman Punjabi/Hinglish; Gurmukhi characters if input is Gurmukhi).
+Listen to the provided audio track and cross-reference it with the provided JSON array of transcription texts. Correct any spelling typos or wrong word interpretations. Strictly output the result in the EXACT same language script style (Roman letters if input is Roman Punjabi/Hinglish; Gurmukhi characters if input is Gurmukhi).
 
 YOUR TASK:
 Carefully perform high-precision spell-checking and text refinement using the provided audio reference if present. Keep the output text in the identical script, language, and meaning.
 
 CRITICAL DIRECTIVES:
-1. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
-2. Perfect the spelling and grammar for the target language context.
-3. Preserve slang, exact vocabulary choice, and timeline integrity. Do NOT paraphrase or translate.
-4. Keep the output array structure, count, and indices EXACTLY identical. The output JSON array must have exactly ${texts.length} elements.
-5. Return ONLY a valid JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
+1. STRICT ARRAY SIZE CONSERVATION (No Dropped Captions): You are ONLY allowed to fix spelling typos. You MUST NOT delete, skip, merge, or remove any caption segments. The total count of output JSON array items MUST EXACTLY match the input array count of ${captions.length} elements.
+2. STRICTLY PRESERVE THE ORIGINAL SCRIPT AND STYLE. If the text language mode is Romanized Punjabi / English Letters (e.g. "Sat Sri Akal"), you MUST keep it in Romanized letters with correct spellings (do NOT convert to Gurmukhi script, and do NOT translate it to English)! Keep Gurmukhi in Gurmukhi, English in English, and Hindi in Hindi.
+3. Perfect the spelling and grammar for the target language context.
+4. Preserve slang, exact vocabulary choice, and meaning integrity. Do NOT paraphrase, summarize, or translate.
+5. Return ONLY a JSON string array of corrected strings (e.g., ["string1", "string2", ...]). Do NOT wrap the JSON inside markdown code blocks or \`\`\`json wrappers.
 
 Input transcription segments to refine:
-${JSON.stringify(texts)}`;
+${JSON.stringify(payloadToRefine, null, 2)}`;
 
   const fileParts: any[] = [];
   if (audioBlob) {
@@ -619,7 +625,7 @@ ${JSON.stringify(texts)}`;
       fileParts.push({
         inlineData: {
           data: base64Audio,
-          mimeType: audioBlob.type || 'audio/mp3'
+          mimeType: audioBlob.type || 'audio/wav'
         }
       });
     } catch (e: any) {
@@ -677,11 +683,25 @@ ${JSON.stringify(texts)}`;
   }
 
   const parsed = JSON.parse(cleaned);
+
   if (!Array.isArray(parsed)) {
     throw new Error('Spellcheck result parse error: output did not produce a corresponding JSON array.');
   }
 
-  return parsed.map(item => String(item).trim());
+  if (parsed.length !== captions.length) {
+    throw new Error(`Gemini parsed array length mismatch. Expected: ${captions.length}, Got: ${parsed.length}`);
+  }
+
+  // Enforce zero timing modifications by map-joining text with pristine original timelines
+  const correctedCaptions: CaptionSegment[] = captions.map((original, i) => {
+    const correctedText = parsed[i];
+    return {
+      ...original,
+      text: typeof correctedText === 'string' ? correctedText.trim() : original.text
+    };
+  });
+
+  return correctedCaptions;
 }
 
 /**
@@ -703,10 +723,10 @@ export async function mapCaptionsToSelectedScript(
     for (let i = 0; i < captions.length; i += BATCH_SIZE) {
       batches.push(captions.slice(i, i + BATCH_SIZE));
     }
-    const results = await Promise.all(
+    const results = await Promise.allSettled(
       batches.map(batch => mapCaptionsToSelectedScript(batch, languageMode, apiKey, onStatusUpdate))
     );
-    return results.flat();
+    return results.map((r, i) => r.status === 'fulfilled' ? r.value : batches[i]).flat();
   }
 
   const finalGeminiKey = apiKey || getBundledGeminiApiKey();

@@ -56,16 +56,23 @@ function autoCalibrateCaptions(segments: CaptionSegment[]): CaptionSegment[] {
 }
 
 /**
+ * Sanitizes and cleans up Gemini-generated timestamps.
+ * Does NOT apply the -0.8s offset.
+ */
+function sanitizeGeminiCaptions(segments: CaptionSegment[]): CaptionSegment[] {
+  return fixTimestamps(segments);
+}
+
+/**
  * Fixes overlapping/wrong timestamps sequentially.
  * Every startTime of segment N must always be greater than or equal to the endTime of N-1 plus a tiny buffer of 0.05s.
+ * Preserves the original start time of the first segment.
  */
 function fixTimestamps(captions: CaptionSegment[]): CaptionSegment[] {
   const result: CaptionSegment[] = [];
   for (let i = 0; i < captions.length; i++) {
     const cap = { ...captions[i] };
-    if (i === 0) {
-      cap.startTime = 0;
-    } else {
+    if (i > 0) {
       const prev = result[i - 1];
       if (cap.startTime <= prev.endTime) {
         cap.startTime = parseFloat((prev.endTime + 0.05).toFixed(2));
@@ -565,15 +572,13 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [latencyOffset, setLatencyOffset] = useState<number>(0.3);
 
-  // Synchronize active caption text with current time and segments using high-frequency requestAnimationFrame and native video events
+  // Synchronize active caption text with current time and segments using a single, high-frequency requestAnimationFrame loop
   useEffect(() => {
     let rafId: number;
-    let isRunning = true;
+    const video = videoRef.current;
+    if (!video) return;
 
-    const syncSubtitles = () => {
-      const video = videoRef.current;
-      if (!video) return;
-
+    const updateTime = () => {
       const time = video.currentTime;
       setCurrentTime(time);
 
@@ -582,50 +587,48 @@ export default function App() {
         lookAheadTime >= c.startTime &&
         lookAheadTime < c.endTime
       );
-
       setActiveCaptionText(matching ? matching.text : '');
 
-      // FIXED: Use video.paused directly - NOT isPlaying state
-      if (!video.paused && !video.ended && isRunning) {
-        rafId = requestAnimationFrame(syncSubtitles);
+      if (!video.paused && !video.ended) {
+        rafId = requestAnimationFrame(updateTime);
       }
     };
 
-    const startLoop = () => {
+    const handlePlay = () => {
       cancelAnimationFrame(rafId);
-      isRunning = true;
-      rafId = requestAnimationFrame(syncSubtitles);
+      rafId = requestAnimationFrame(updateTime);
     };
 
-    const stopLoop = () => {
-      syncSubtitles(); // one last update on pause
+    const handlePause = () => {
+      cancelAnimationFrame(rafId);
+      updateTime(); // Sync one last time on pause
     };
 
-    const video = videoRef.current;
-    if (video) {
-      video.addEventListener('play', startLoop);
-      video.addEventListener('pause', stopLoop);
-      video.addEventListener('ended', stopLoop);
-      video.addEventListener('seeking', syncSubtitles);
-      video.addEventListener('seeked', startLoop);
-      video.addEventListener('timeupdate', syncSubtitles);
+    const handleSeeking = () => {
+      updateTime();
+    };
 
-      // Start immediately if already playing
-      if (!video.paused) startLoop();
-      else syncSubtitles();
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
+    video.addEventListener('ended', handlePause);
+    video.addEventListener('seeking', handleSeeking);
+    video.addEventListener('seeked', handleSeeking);
+
+    // Initial sync
+    updateTime();
+
+    // If already playing some other way
+    if (!video.paused) {
+      handlePlay();
     }
 
     return () => {
-      isRunning = false;
       cancelAnimationFrame(rafId);
-      if (video) {
-        video.removeEventListener('play', startLoop);
-        video.removeEventListener('pause', stopLoop);
-        video.removeEventListener('ended', stopLoop);
-        video.removeEventListener('seeking', syncSubtitles);
-        video.removeEventListener('seeked', startLoop);
-        video.removeEventListener('timeupdate', syncSubtitles);
-      }
+      video.removeEventListener('play', handlePlay);
+      video.removeEventListener('pause', handlePause);
+      video.removeEventListener('ended', handlePause);
+      video.removeEventListener('seeking', handleSeeking);
+      video.removeEventListener('seeked', handleSeeking);
     };
   }, [captions, videoUrl, currentStep, latencyOffset]);
 
@@ -754,9 +757,12 @@ export default function App() {
     
     if (onStatusUpdate) onStatusUpdate("Encoding mono 16kHz compressed audio blob...");
     
-    // We only need 1 channel (mono) at 16000Hz to match classic speech models perfectly
+    // We only need 1 channel (mono) to match classic speech models perfectly
     const channelData = decodedBuffer.getChannelData(0); // first channel
     const sampleCount = channelData.length;
+    const sampleRate = decodedBuffer.sampleRate; // Read actual decoded sample rate dynamically
+    
+    if (onStatusUpdate) onStatusUpdate(`Encoding mono ${sampleRate}Hz compressed audio blob...`);
     
     // Create WAV container
     const buffer = new ArrayBuffer(44 + sampleCount * 2);
@@ -777,9 +783,9 @@ export default function App() {
     /* channel count */
     view.setUint16(22, 1, true); // mono
     /* sample rate */
-    view.setUint32(24, 16000, true);
+    view.setUint32(24, sampleRate, true);
     /* byte rate (sample rate * block align) */
-    view.setUint32(28, 16000 * 2, true);
+    view.setUint32(28, sampleRate * 2, true);
     /* block align */
     view.setUint16(32, 2, true);
     /* bits per sample */
@@ -845,6 +851,12 @@ export default function App() {
             captionLanguageMode
           );
           isGroqSuccessful = true;
+          
+          // Apply automatic 0.8s calibration offset and sequence alignment to standard Groq Whisper timestamps
+          if (parsedCaptions && parsedCaptions.length > 0) {
+            const calibrated = autoCalibrateCaptions(parsedCaptions);
+            parsedCaptions = fixTimestamps(calibrated);
+          }
         } catch (groqErr: any) {
           console.warn('Groq Whisper failed, trying fallback to Gemini:', groqErr);
           setTranscribeStatus(`⚠️ Groq Whisper error: ${groqErr.message || 'Server Error'}. Auto-falling back to Gemini Core API...`);
@@ -875,8 +887,8 @@ export default function App() {
         setTranscribeStatus('Aligning audio timestamps and word layouts...');
 
         if (parsedCaptions && parsedCaptions.length > 0) {
-          const calibrated = autoCalibrateCaptions(parsedCaptions);
-          parsedCaptions = fixTimestamps(calibrated);
+          // Never apply -0.8s offset calibration to Gemini path (only clean overlapping/wrong sequence timings)
+          parsedCaptions = sanitizeGeminiCaptions(parsedCaptions);
         } else {
           throw new Error('No transcripts returned by the Gemini core script parser.');
         }
@@ -887,23 +899,27 @@ export default function App() {
         setUploadProgress(90);
         setTranscribeStatus('Perfecting captions vocabulary with Gemini-2.5-flash spellcheck...');
         
+        // Backup of original Groq captions in case Gemini fails or truncates the array
+        const backupGroqCaptions = [...parsedCaptions];
+
         try {
-          const textsToCorrect = parsedCaptions.map(c => c.text);
-          const correctedTexts = await correctCaptionsSpellingGemini(
-            textsToCorrect,
+          const perfectedCaptions = await correctCaptionsSpellingGemini(
+            parsedCaptions,
             captionLanguageMode,
             geminiApiKey.trim(),
             activeAudioBlob,
             (status) => setTranscribeStatus(`${status}`)
           );
           
-          parsedCaptions = parsedCaptions.map((c, idx) => ({
-            ...c,
-            text: correctedTexts[idx] !== undefined ? correctedTexts[idx] : c.text
-          }));
-          setTranscribeStatus('Vocabulary perfected successfully!');
+          if (perfectedCaptions && perfectedCaptions.length === parsedCaptions.length) {
+            parsedCaptions = perfectedCaptions;
+            setTranscribeStatus('Vocabulary perfected successfully!');
+          } else {
+            throw new Error('Gemini returned an invalid or truncated caption array.');
+          }
         } catch (spellErr: any) {
-          console.warn('Auto-spellcheck failed, falling back to raw Whisper transcript:', spellErr);
+          console.warn('Auto-spellcheck failed, falling back to original Groq transcript:', spellErr);
+          parsedCaptions = backupGroqCaptions; // Immediate fallback
           setTranscribeStatus('⚠️ Audio-assisted spellcheck bypassed. Standard transcript loaded.');
           await new Promise(r => setTimeout(r, 1500));
         }
@@ -952,6 +968,7 @@ export default function App() {
     setSpellConflictError(null);
     
     let activeAudioBlob = extractedAudioBlob;
+    const backupCaptions = [...captions];
     
     try {
       if (!activeAudioBlob && videoFile) {
@@ -959,22 +976,23 @@ export default function App() {
         setExtractedAudioBlob(activeAudioBlob);
       }
       
-      const textsToCorrect = captions.map(c => c.text);
-      const correctedTexts = await correctCaptionsSpellingGemini(
-        textsToCorrect,
+      const perfectedCaptions = await correctCaptionsSpellingGemini(
+        captions,
         captionLanguageMode,
         geminiApiKey.trim(),
         activeAudioBlob,
         (status) => setTranscribeStatus(status)
       );
       
-      setCaptions(prev => prev.map((c, idx) => ({
-        ...c,
-        text: correctedTexts[idx] !== undefined ? correctedTexts[idx] : c.text
-      })));
-      setTranscribeStatus("Successfully corrected spelling using audio-assisted Gemini 2.0 Flash!");
+      if (perfectedCaptions && perfectedCaptions.length === captions.length) {
+        setCaptions(perfectedCaptions);
+        setTranscribeStatus("Successfully corrected spelling using audio-assisted Gemini 2.5 Flash!");
+      } else {
+        throw new Error('Gemini returned an invalid or truncated caption array.');
+      }
     } catch (err: any) {
       console.error(err);
+      setCaptions(backupCaptions); // Restore from backup
       setSpellConflictError(err.message || 'Spell correction failed. Please verify your Gemini API key and try again.');
     } finally {
       setIsSpellingCorrecting(false);
@@ -1018,9 +1036,11 @@ export default function App() {
     ctx: CanvasRenderingContext2D, 
     width: number, 
     height: number, 
-    time: number
+    time: number,
+    isExport: boolean = false
   ) => {
-    const lookAheadTime = time + latencyOffset;
+    const offset = isExport ? 0 : latencyOffset;
+    const lookAheadTime = time + offset;
     const activeSeg = captions.find(c => 
       lookAheadTime >= c.startTime && 
       lookAheadTime < c.endTime
@@ -1086,7 +1106,7 @@ export default function App() {
       ctx.arcTo(bgX + bgW, bgY, bgX + bgW, bgY + bgH, r);
       ctx.arcTo(bgX + bgW, bgY + bgH, bgX, bgY + bgH, r);
       ctx.arcTo(bgX, bgY + bgH, bgX, bgY, r);
-      ctx.arcTo(bgX, bgY + bgX, bgX + bgW, bgY, r);
+      ctx.arcTo(bgX, bgY, bgX + bgW, bgY, r);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -1449,8 +1469,8 @@ export default function App() {
               console.warn('Failed to draw current frame:', e);
             }
 
-            // Draw verbatim scaled subtitle overlays
-            drawSubtitlesOnCanvas(ctx, videoWidth, videoHeight, exportVideo.currentTime);
+            // Draw verbatim scaled subtitle overlays (passing isExport = true to bypass latencyOffset)
+            drawSubtitlesOnCanvas(ctx, videoWidth, videoHeight, exportVideo.currentTime, true);
 
             // Track proportional export progress matching the play clock
             const percentage = Math.min(99, Math.round((exportVideo.currentTime / duration) * 100));
