@@ -585,11 +585,12 @@ export default function App() {
     if (!video) return;
 
     let rafId: number;
+    let fallbackInterval: any;
     let lastTime = -1;
 
     const syncTime = () => {
       const time = video.currentTime;
-      if (Math.abs(lastTime - time) > 0.005) {
+      if (lastTime !== time) {
         lastTime = time;
         setCurrentTime(time);
 
@@ -611,11 +612,15 @@ export default function App() {
 
     const startLoop = () => {
       cancelAnimationFrame(rafId);
+      clearInterval(fallbackInterval);
       rafId = requestAnimationFrame(loop);
+      // Backup timer in case the browser throttles requestAnimationFrame inside preview iframes
+      fallbackInterval = setInterval(syncTime, 50);
     };
 
     const stopLoop = () => {
       cancelAnimationFrame(rafId);
+      clearInterval(fallbackInterval);
       syncTime();
     };
 
@@ -626,8 +631,8 @@ export default function App() {
     video.addEventListener('ended', stopLoop);
     video.addEventListener('seeking', syncTime);
     video.addEventListener('seeked', syncTime);
-    // Any timeupdate event triggers startLoop to automatically resurrect the active RAF loop if got killed by browser buffering
-    video.addEventListener('timeupdate', startLoop);
+    // Bind directly to native timeupdate for bulletproof timestamp progression
+    video.addEventListener('timeupdate', syncTime);
 
     // Initial sync
     syncTime();
@@ -637,13 +642,14 @@ export default function App() {
 
     return () => {
       cancelAnimationFrame(rafId);
+      clearInterval(fallbackInterval);
       video.removeEventListener('play', startLoop);
       video.removeEventListener('playing', startLoop);
       video.removeEventListener('pause', stopLoop);
       video.removeEventListener('ended', stopLoop);
       video.removeEventListener('seeking', syncTime);
       video.removeEventListener('seeked', syncTime);
-      video.removeEventListener('timeupdate', startLoop);
+      video.removeEventListener('timeupdate', syncTime);
     };
   }, [videoElement, captions, videoUrl, currentStep, latencyOffset]);
 
@@ -1113,7 +1119,8 @@ export default function App() {
     time: number,
     isExport: boolean = false
   ) => {
-    const offset = isExport ? 0 : latencyOffset;
+    // Maintain the user's precise latency calibration in both real-time preview and final video export layers
+    const offset = latencyOffset;
     const lookAheadTime = time + offset;
     const activeSeg = captions.find(c => 
       lookAheadTime >= c.startTime && 
@@ -1390,13 +1397,13 @@ export default function App() {
 
   // High performance Canvas Media Recorder exporter (Real-time playback sync)
   const handleBurnAndExport = async () => {
-    if (!videoUrl) return;
+    if (!videoUrl || isExporting) return;
 
     setIsExporting(true);
     setExportProgress(0);
     setExportStatus('Matching video frame dimensions...');
 
-    // We instantiate a temporal quiet video element specifically designed to run on background context
+    // We instantiate an unthrottled high-priority video element to process real-time frames smoothly
     const exportVideo = document.createElement('video');
     exportVideo.src = videoUrl;
     exportVideo.crossOrigin = 'anonymous';
@@ -1405,16 +1412,39 @@ export default function App() {
     exportVideo.volume = 0;
     exportVideo.playsInline = true;
 
-    // Standard high-reliability styling to keep video rendering in DOM active without browser background throttling
+    // Sized larger than 300px and opaque so Chrome and OS hardware acceleration keeps it at maximum thread priority (no throttling)
     exportVideo.style.position = 'fixed';
-    exportVideo.style.top = '0';
-    exportVideo.style.left = '0';
-    exportVideo.style.width = '1px';
-    exportVideo.style.height = '1px';
-    exportVideo.style.opacity = '0.01';
+    exportVideo.style.bottom = '16px';
+    exportVideo.style.right = '16px';
+    exportVideo.style.width = '320px';
+    exportVideo.style.height = '180px';
+    exportVideo.style.opacity = '0.99';
     exportVideo.style.pointerEvents = 'none';
-    exportVideo.style.zIndex = '-9999';
+    exportVideo.style.zIndex = '9999';
+    exportVideo.style.borderRadius = '12px';
+    exportVideo.style.border = '4px solid #6366f1';
+    exportVideo.style.boxShadow = '0 12px 30px rgba(0, 0, 0, 0.9)';
+
+    // Visual helper so the user understands a render run is occurring in the DOM viewport
+    const labelOverlay = document.createElement('div');
+    labelOverlay.innerText = '⚡ BAKE ENGINE BENCH ACTIVE';
+    labelOverlay.style.position = 'fixed';
+    labelOverlay.style.bottom = '196px';
+    labelOverlay.style.right = '20px';
+    labelOverlay.style.zIndex = '10000';
+    labelOverlay.style.fontFamily = "system-ui, -apple-system, sans-serif";
+    labelOverlay.style.fontSize = '9px';
+    labelOverlay.style.fontWeight = 'bold';
+    labelOverlay.style.color = '#ffffff';
+    labelOverlay.style.backgroundColor = '#6366f1';
+    labelOverlay.style.padding = '4px 10px';
+    labelOverlay.style.borderRadius = '6px';
+    labelOverlay.style.letterSpacing = '1.2px';
+    labelOverlay.style.pointerEvents = 'none';
+    labelOverlay.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
+
     document.body.appendChild(exportVideo);
+    document.body.appendChild(labelOverlay);
 
     let recorder: MediaRecorder | null = null;
     let animationFrameId: number | null = null;
@@ -1429,6 +1459,9 @@ export default function App() {
       } catch (e) {}
       if (exportVideo.parentNode) {
         exportVideo.parentNode.removeChild(exportVideo);
+      }
+      if (labelOverlay.parentNode) {
+        labelOverlay.parentNode.removeChild(labelOverlay);
       }
       setIsExporting(false);
     };
@@ -1471,12 +1504,22 @@ export default function App() {
         console.warn('Audio track capture bypass launched:', audioErr);
       }
 
-      let mimeType = 'video/webm;codecs=vp8';
+      // Query best performance WebM codec parameters
+      let mimeType = 'video/webm;codecs=vp9,opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=vp8,opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm;codecs=h264';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
       if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/mp4';
       if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
 
       const chunks: Blob[] = [];
-      recorder = new MediaRecorder(canvasStream, mimeType ? { mimeType } : undefined);
+      const recorderOptions: MediaRecorderOptions = {
+        mimeType: mimeType || undefined,
+        videoBitsPerSecond: 12000000, // 12 Mbps for stellar high-definition crisp output quality!
+        audioBitsPerSecond: 128000   // 128 kbps CD-quality audio encoding
+      };
+      
+      recorder = new MediaRecorder(canvasStream, recorderOptions);
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -1543,7 +1586,7 @@ export default function App() {
               console.warn('Failed to draw current frame:', e);
             }
 
-            // Draw verbatim scaled subtitle overlays (passing isExport = true to bypass latencyOffset)
+            // Draw verbatim scaled subtitle overlays
             drawSubtitlesOnCanvas(ctx, videoWidth, videoHeight, exportVideo.currentTime, true);
 
             // Track proportional export progress matching the play clock
@@ -2984,8 +3027,24 @@ export default function App() {
               </p>
             </div>
 
-            {/* OFF-SCREEN CAPTURE CANVAS */}
-            <canvas ref={canvasRef} className="hidden" />
+            {/* REAL-TIME PREVIEW LIVE MONITOR */}
+            <div className="space-y-2.5 pb-1 select-none">
+              <span className="text-[10px] font-mono tracking-widest uppercase bg-indigo-500/10 text-indigo-300 border border-indigo-505/15 px-3 py-1 rounded-full font-bold">
+                Live Rendering Burn Monitor
+              </span>
+              <div id="burn-monitor-container" className="relative w-full aspect-video border-2 border-neutral-800 rounded-2xl overflow-hidden bg-black shadow-2xl flex items-center justify-center animate-fadeIn">
+                <canvas 
+                  ref={canvasRef} 
+                  className="w-full h-full object-contain"
+                  style={{ display: 'block' }}
+                />
+                {!isExporting && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-neutral-950/85 backdrop-blur-sm">
+                    <p className="text-xs text-neutral-400 font-medium font-mono">Bake preview will load automatically...</p>
+                  </div>
+                )}
+              </div>
+            </div>
 
             {/* COMPREHENSIVE ACTION MONITOR */}
             <div className="space-y-4 p-5 bg-neutral-950 border border-neutral-850 rounded-2xl">
